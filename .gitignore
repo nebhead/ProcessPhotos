@@ -11,6 +11,10 @@ import
 
 local/
 
+originals/
+
+venv/
+
 logs/app.log
 
 lt.sh
