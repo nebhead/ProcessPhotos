@@ -1,0 +1,14 @@
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - /home/ben/docker/processphotos/import:/import
+      - /home/ben/docker/processphotos/export:/export
+      - /home/ben/docker/processphotos/config:/config
+      - /home/ben/docker/processphotos/originals:/originals
+      - /home/ben/docker/processphotos/logs:/logs
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1

@@ -1,0 +1,153 @@
+{% macro back_button(back_to_step) %}
+<button type="button" class="btn btn-outline-info" onclick="window.location.replace('/');">
+	<i class="fa-solid fa-circle-left"></i>&nbsp; Back to 
+	{% if back_to_step == "selectfolder" %}
+		Select Folder
+	{% elif back_to_step == "importfolder" %}
+		Import Folder
+	{% else %}
+		Home
+	{% endif %}
+</button>
+<script>
+	var backToStep = "{{ back_to_step }}";
+	function goBack() {
+		if(backToStep == "selectfolder") {
+			selectFolder('init', '', '');
+		} else if(backToStep == "importfolder") {
+			importFolder();
+		} else {
+			window.location.href = "/";
+		}
+	}
+</script>
+{% endmacro %}
+
+{% macro folder_info_row(folder_info, current_path) %}
+<tr>
+	<td><h3>{{ folder_info['name'] }}</h3></td>
+	<td><h3>{{ folder_info['num_folders'] }}</h3></td>
+	<td><h3>{{ folder_info['num_files'] }}</h3></td>
+	<td>
+		<h3 id="processed_{{ folder_info['name'] }}" value="{{ folder_info['processed'] }}" onclick="toggleProcessed('processed_{{ folder_info['name'] }}', '{{ current_path }}/{{ folder_info['name'] }}', this.getAttribute('value'))">
+			{% if folder_info['processed'] %}
+				<i class="fa-solid fa-circle-check text-success"></i>
+			{% else %}
+				<i class="fa-solid fa-circle-xmark text-danger"></i>
+			{% endif %}
+		</h3>
+	</td>
+	<td>
+		{% if folder_info['num_files'] > 0 or folder_info['num_folders'] > 0 %}
+		<button class="btn btn-outline-success" onclick="importFolder('copy', '{{ current_path }}/{{ folder_info['name'] }}');">
+			<i class="fa-solid fa-file-import"></i>&nbsp; Import Folder
+		</button>
+		<button class="btn btn-outline-info" onclick="preprocessFolder('start', '{{ current_path }}/{{ folder_info['name'] }}');">
+			<i class="fa-solid fa-file-import"></i>&nbsp; Pre-Process Folder
+		</button>
+		{% else %}
+		<button type="button" class="btn btn-outline-secondary" disabled>
+			<i class="fa-solid fa-file-import"></i>&nbsp; Import Folder
+		</button>
+		<button type="button" class="btn btn-outline-secondary" disabled>
+			<i class="fa-solid fa-file-import"></i>&nbsp; Pre-Process Folder
+		</button>
+		{% endif %}
+		{% if folder_info['num_folders'] > 0 %}
+			<button class="btn btn-outline-primary" onclick="selectFolder('open_folder', '{{ current_path }}', '{{ folder_info['name'] }}');">
+				<i class="fa-solid fa-folder-tree"></i>&nbsp; Open Folder
+			</button>
+		{% endif %}
+	</td>
+</tr>
+{% endmacro %}
+
+{% macro file_info_row(file) %}
+<tr>
+	<td>
+		<a href="#" data-bs-toggle="modal" data-bs-target="#imageModal" onclick="showImage('{{ url_for('static', filename='img/' + file['image_link']) }}', '{{ file['filename'] }}')">
+			<img src="{{ url_for('static', filename='img/' + file['image_link']) }}" class="img-thumbnail" style="width: 100px; height: auto;">
+		</a>
+	</td>
+	<td>{{ file['filename'] }}</td>
+	<td>{{ file['path'] | replace('./static/img', '') }}</td>
+	<td>{{ file['file_date'] }}</td>
+	<td>
+		{% if file['guessed_dates']['filedate'] %}
+		<div class="form-check">
+			<input class="form-check-input" type="radio" name="choices_fileid_{{ file['path'] }}/{{ file['filename']}}" 
+														 id="fileid_{{ file['path'] }}/{{ file['filename']}}_filedate"
+														 value="{{file['guessed_dates']['filedate']}}">
+			<label class="form-check-label" for="fileid_{{ file['path'] }}/{{ file['filename']}}_filedate">
+				<strong>File Date:</strong> {{ file['guessed_dates']['filedate'] }}
+			</label>
+		</div>
+		{% endif %}
+		{% if file['guessed_dates']['filename'] %}
+		<div class="form-check">
+			<input class="form-check-input" type="radio" name="choices_fileid_{{ file['path'] }}/{{ file['filename']}}" 
+														 id="fileid_{{ file['path'] }}/{{ file['filename']}}_filename"
+														 value="{{file['guessed_dates']['filename']}}">
+			<label class="form-check-label" for="fileid_{{ file['path'] }}/{{ file['filename']}}_filename">
+				<strong>File Name:</strong> {{ file['guessed_dates']['filename'] }}
+			</label>
+		</div>
+		{% endif %}
+		{% if file['guessed_dates']['pathname'] %}
+		<div class="form-check">
+			<input class="form-check-input" type="radio" name="choices_fileid_{{ file['path'] }}/{{ file['filename']}}" 
+														 id="fileid_{{ file['path'] }}/{{ file['filename']}}_pathname"
+														 value="{{file['guessed_dates']['pathname']}}">
+			<label class="form-check-label" for="fileid_{{ file['path'] }}/{{ file['filename']}}_pathname">
+				<strong>Path Name:</strong> {{ file['guessed_dates']['pathname'] }}
+			</label>
+		</div>
+		{% endif %}
+		{% if file['start_date'] %}
+		<div class="form-check">
+			<input class="form-check-input" type="radio" name="choices_fileid_{{ file['path'] }}/{{ file['filename']}}" 
+														 id="fileid_{{ file['path'] }}/{{ file['filename']}}_startdate" 
+														 value="{{ file['start_date'] }}">
+			<label class="form-check-label" for="fileid_{{ file['path'] }}/{{ file['filename']}}_startdate">
+				<strong>Start:</strong> {{ file['start_date'] }}
+			</label>
+		</div>
+		{% endif %}
+		{% if file['end_date'] %}
+		<div class="form-check">
+			<input class="form-check-input" type="radio" name="choices_fileid_{{ file['path'] }}/{{ file['filename']}}" 
+														 id="fileid_{{ file['path'] }}/{{ file['filename']}}_enddate" 
+														 value="{{ file['end_date'] }}">
+			<label class="form-check-label" for="fileid_{{ file['path'] }}/{{ file['filename']}}_enddate">
+				<strong>End:</strong> {{ file['end_date'] }}
+			</label>
+		</div>
+		{% endif %}
+		<div class="form-check">
+			<input class="form-check-input" type="radio" name="choices_fileid_{{ file['path'] }}/{{ file['filename']}}" 
+														 id="fileid_{{ file['path'] }}/{{ file['filename']}}_custom" 
+														 value="">
+			<label class="form-check-label" for="fileid_{{ file['path'] }}/{{ file['filename']}}_custom">
+				<!-- Add date picker here -->
+				<input type="date" class="form-control" id="fileid_{{ file['path'] }}/{{ file['filename']}}_custom_date" onchange="updateCustomDate('{{ file['path'] }}/{{ file['filename']}}')">
+			</label>
+		</div>
+		<div class="form-check">
+			<input class="form-check-input" type="radio" name="choices_fileid_{{ file['path'] }}/{{ file['filename']}}" 
+														 id="fileid_{{ file['path'] }}/{{ file['filename']}}_ignore" 
+														 value="ignore" checked>
+			<label class="form-check-label" for="fileid_{{ file['path'] }}/{{ file['filename']}}_ignore">
+				Don't Edit Date
+			</label>
+		</div>
+		<div class="form-check">
+			<input class="form-check-input" type="radio" name="choices_fileid_{{ file['path'] }}/{{ file['filename']}}" 
+			                                             id="fileid_{{ file['path'] }}/{{ file['filename']}}_delete" 
+														 value="delete">
+			<label class="form-check-label" for="fileid_{{ file['path'] }}/{{ file['filename']}}_delete">
+				Delete File
+			</label>
+		</div>
+	</td>
+</tr>
+{% endmacro %}

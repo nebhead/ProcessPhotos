@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+
+{% block title %} Dashboard {% endblock %}
+
+{% block content %} 
+<div class="container">
+	<!-- =========== Welcome Row =============== -->
+	<div class="row" id="process_welcome_row">
+		<div class="col mb-4">
+			<div class="card">
+				<div class="btn btn-outline-primary" id="process_selectfolder_btn">
+					<h1><br><i class="fa-solid fa-folder-tree"></i></h1>
+					<h5><br>Select Originals to Process<br><br></h5>
+				</div>
+			</div>
+		</div> <!-- End of Column -->
+		<div class="col mb-4">
+			<div class="card">
+				<div class="btn btn-outline-primary" id="process_importfolder_btn">
+					<h1><br><i class="fa-regular fa-folder-open"></i></h1>
+					<h5><br>Use Import Folder<br><br></h5>
+				</div>
+			</div>
+		</div> <!-- End of Column -->
+		<div class="col mb-4">
+			<div class="card">
+				<div class="btn btn-outline-primary" id="process_postprocess_btn">
+					<h1><br><i class="fa-solid fa-scroll"></i></h1>
+					<h5><br>Run Post-Process Script<br><br></h5>
+				</div>
+			</div>
+		</div> <!-- End of Column -->
+	</div> <!-- End of Row -->
+
+	<!-- =========== Working Row =============== -->
+	<div class="row" id="process_working_row" style="display:none">
+	</div>
+
+</div> <!-- End of Container -->
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/process.js') }}"></script>
+{% endblock %}

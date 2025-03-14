@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Background -->
+  <rect x="10" y="10" width="80" height="80" rx="15" fill="#4A90E2" />
+  
+  <!-- Image Frame -->
+  <rect x="25" y="25" width="50" height="35" rx="5" fill="white" />
+  
+  <!-- Mountain/Landscape in Frame -->
+  <path d="M25 50 L40 35 L55 45 L75 30 L75 55 L25 55 Z" fill="#87CEEB"/>
+  
+  <!-- Calendar Base -->
+  <rect x="35" y="48" width="30" height="25" fill="white"/>
+  
+  <!-- Calendar Top Bar -->
+  <rect x="35" y="48" width="30" height="6" fill="#FF4444"/>
+  
+  <!-- Calendar Lines -->
+  <line x1="42" y1="61" x2="58" y2="61" stroke="#666" stroke-width="1"/>
+  <line x1="42" y1="66" x2="58" y2="66" stroke="#666" stroke-width="1"/>
+  
+  <!-- Pencil -->
+  <g transform="translate(65,60) rotate(-45)">
+    <!-- Pencil Body -->
+    <rect x="0" y="0" width="20" height="8" fill="#FFD700"/>
+    <!-- Pencil Tip -->
+    <path d="M0 0 L0 8 L-5 4 Z" fill="#8B4513"/>
+    <!-- Pencil Eraser -->
+    <rect x="20" y="0" width="4" height="8" fill="#FF6B6B"/>
+    <!-- Wood Grain Lines -->
+    <line x1="5" y1="0" x2="5" y2="8" stroke="#DBA901" stroke-width="0.5"/>
+    <line x1="10" y1="0" x2="10" y2="8" stroke="#DBA901" stroke-width="0.5"/>
+    <line x1="15" y1="0" x2="15" y2="8" stroke="#DBA901" stroke-width="0.5"/>
+  </g>
+</svg>

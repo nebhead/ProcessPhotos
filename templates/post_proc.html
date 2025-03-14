@@ -1,0 +1,72 @@
+{% from "macros.html" import back_button %}
+<!-- Global Back Button -->
+<div class="row">
+	{{ back_button("home") }}
+</div>
+
+<div class="row">
+	&nbsp;
+</div>
+
+<div class="row">
+    <div class="col">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <strong>
+                    Post-Processing Stream: 
+                    <span id="postProcWorking" style="color:yellow">
+                        <i>&nbsp;Working&nbsp;</i>
+                        <div class="spinner-border spinner-border-sm" role="status">
+                            <span class="visually-hidden">...</span>
+                        </div>  
+                    </span>
+                    <span id="postProcDone" style="display: none; color:#33ff00;">
+                        <i>&nbsp;Done&nbsp;</i>
+                        <i class="fa-regular fa-thumbs-up"></i>
+                    </span>
+                </strong>
+            </div>
+            <div class="card-body">
+                <style>
+                    #outputPostProc {
+                        white-space: pre;
+                        font-family: monospace;
+                        background: #000000;
+                        padding: 1em;
+                        border: 1px solid #585858;
+                        height: 600px;
+                        overflow-y: auto;
+                        color: #33ff00
+                    }
+                </style>
+                <div id="outputPostProc"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const outputPostProc = document.getElementById('outputPostProc');
+
+    outputPostProc.textContent += '\n+++ Calling API +++\n';
+
+    const paramsPostProc = new URLSearchParams({
+        script_arg: 'postprocess'
+    });
+    const eventSourcePostProc = new EventSource(`/stream?${paramsPostProc.toString()}`);
+    
+    eventSourcePostProc.onmessage = function(e) {
+        // Parse the JSON-encoded data and append it
+        const text = JSON.parse(e.data);
+        outputPostProc.textContent += text;
+        outputPostProc.scrollTop = outputPostProc.scrollHeight;
+    };
+    
+    eventSourcePostProc.onerror = function(e) {
+        outputPostProc.textContent += '\nConnection closed\n';
+        eventSourcePostProc.close();
+        // Do something?
+        $('#postProcWorking').hide();
+        $('#postProcDone').show();
+    };
+</script>

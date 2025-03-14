@@ -1,0 +1,160 @@
+{% from "macros.html" import back_button %}
+<!-- Global Back Button -->
+<div class="row">
+	{{ back_button("home") }}
+</div>
+
+<div class="row">
+	&nbsp;
+	<!-- Task ID -->
+	<input type="hidden" id="task_id" value="{{ task_id }}">
+</div>
+
+{% if action is defined %}
+	{% if action == "process" %}
+		<div class="row gy-2 text-center">
+			<h3>Processing Files...</h3>
+		</div>
+		<div class="row gy-2">
+			<div class="progress" role="progressbar" aria-label="Processing Files & Folders" aria-valuenow="{{ percent_complete }}" aria-valuemin="0" aria-valuemax="100" style="height: 40px">
+				<div class="progress-bar progress-bar-striped progress-bar-animated" style="width: {{ percent_complete }}%" id="progress_percent">{{ percent_complete }}%</div>
+			</div>
+		</div>
+		<div class="row gy-2 text-center">
+			&nbsp;
+		</div>
+		<div class="d-flex justify-content-center">
+			<a href="/" type="button" class="btn btn-outline-warning">
+				<i class="fa-solid fa-ban"></i>&nbsp; Cancel Action
+			</a>
+		</div>
+		<script>
+			// Update Progress Bar
+			postdata = {
+				"action": "process_progress",
+				"task_id": "{{ task_id }}"
+			};
+			var process_interval = setInterval(function() {
+				$.ajax({
+					url: "/finish",
+					type: "POST",
+					data: postdata,
+					success: function(data) {
+						//console.log(data.progress);
+						var progress = Math.floor(data.progress);
+						$("#progress_percent").css("width", progress + "%");
+						$("#progress_percent").text(progress + "%");
+						if (data.progress == 100) {
+							clearInterval(process_interval);
+							showResultsPage('{{ task_id }}');
+						}
+					}
+				});
+			}, 200);
+		</script>
+	{% elif action == "results" %}
+	<div class="row">
+		<div class="col">
+			<button class="btn btn-outline-primary" onclick="postProcess('start');">
+				<i class="fa-solid fa-scroll"></i>&nbsp; Run Post Process Script
+			</button>
+		</div>
+	</div>
+	<div class="row">
+		&nbsp;
+	</div>
+	<div class="row">
+		<div class="col">
+			<div class="card">
+				<div class="card-header bg-primary text-white">
+					<strong>
+						Results
+					</strong>
+				</div>
+				<div class="card-body">
+					{% for result in results['errors'] %}
+						<div class="alert alert-danger" role="alert">
+							{{ result }}
+						</div>
+					{% endfor %}
+					<!-- Table of Files Edited -->
+					<table class="table align-middle">
+						<thead>
+							<tr>
+								<th scope="col">Edited Files</th>
+							</tr>
+						</thead>
+						<tbody>
+							{% for result in results['files_edited'] %}
+							<tr>
+								<td>
+									{{ result }}
+								</td>
+							</tr>
+							{% endfor %}
+						</tbody>
+					</table>
+					<!-- Table of Files Deleted -->
+					<table class="table align-middle">
+						<thead>
+							<tr>
+								<th scope="col">Deleted Files</th>
+							</tr>
+						</thead>
+						<tbody>
+							{% for result in results['files_deleted'] %}
+							<tr>
+								<td>
+									{{ result }}
+								</td>
+							</tr>
+							{% endfor %}
+						</tbody>
+					</table>
+					<!-- Table of Files Ignored -->
+					<table class="table align-middle">
+						<thead>
+							<tr>
+								<th scope="col">Ignored/Unedited Files</th>
+							</tr>
+						</thead>
+						<tbody>
+							{% for result in results['files_ignored'] %}
+							<tr>
+								<td>
+									{{ result }}
+								</td>
+							</tr>
+							{% endfor %}
+						</tbody>
+					</table>
+					<!-- Table of Files Copied -->
+					<table class="table align-middle">
+						<thead>
+							<tr>
+								<th scope="col">Copied Files</th>
+							</tr>
+						</thead>
+						<tbody>
+							{% for result in results['files_copied'] %}
+							<tr>
+								<td>
+									{{ result }}
+								</td>
+							</tr>
+							{% endfor %}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+	</div>
+	{% endif %}
+
+{% else %}
+	<div class="alert alert-warning" role="alert">
+		<i class="fa-solid fa-exclamation-triangle"></i>&nbsp; No action defined. Please go back and try again.
+	</div>
+{% endif %}
+
+

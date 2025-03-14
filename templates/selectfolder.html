@@ -1,0 +1,48 @@
+{% from "macros.html" import back_button, folder_info_row %}
+<!-- Global Back Button -->
+<div class="row gy-1">
+	{{ back_button("home") }}
+</div>
+<!-- Folder Navigation -->
+<div class="row gy-1">
+	<div class="d-flex gap-2">
+		<button class="btn btn-outline-primary" onclick="selectFolder('init', '', '');">
+			<i class="fa-solid fa-home"></i>&nbsp; Root
+		</button>
+		<button class="btn btn-outline-primary" onclick="selectFolder('back_folder', '{{ current_path }}', '');">
+			<i class="fa-solid fa-arrow-up"></i>&nbsp; Parent Folder
+		</button>
+		<button class="btn btn-outline-success" onclick="selectFolder('refresh', '', '');" data-bs-toggle="tooltip" data-bs-placement="top" title="Refresh All Folders in Originals Folder">
+			<i class="fa-solid fa-rotate"></i>&nbsp; Refresh All 
+		</button>
+	</div>
+</div>
+<!-- Folder Table -->
+<div class="row gy-1">
+	<div class="card">
+		<div class="card-body">
+			{% if folder_data is defined %}
+				<table class="table align-middle">
+					<thead>
+						<tr>
+							<th scope="col"><i class="fa-regular fa-folder"></i>&nbsp; Name</th>
+							<th scope="col"><i class="fa-solid fa-folder-tree"></i>&nbsp; Folders</th>
+							<th scope="col"><i class="fa-solid fa-file"></i>&nbsp; Files</th>
+							<th scope="col"><i class="fa-solid fa-circle-check"></i>&nbsp; Processed</th>
+							<th scope="col"><i class="fa-solid fa-gear"></i>&nbsp; Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						{% for folder in folder_data %}
+							{{ folder_info_row(folder, current_path) }}
+						{% endfor %}
+					</tbody>
+				</table>
+			{% else %}
+				<div class="alert alert-warning" role="alert">
+					<i class="fa-solid fa-exclamation-triangle"></i>&nbsp; No folders found in the selected directory.
+				</div>
+			{% endif %}
+		</div>
+	</div>
+</div>

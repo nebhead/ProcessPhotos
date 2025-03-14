@@ -1,0 +1,423 @@
+{% from "macros.html" import back_button, file_info_row %}
+<!-- Global Back Button -->
+<div class="row">
+	{{ back_button("home") }}
+</div>
+
+<div class="row">
+	&nbsp;
+	<!-- Task ID -->
+	<input type="hidden" id="task_id" value="{{ task_id }}">
+	<input type="hidden" id="original_path" value="{{ import_data['original_path'] }}">
+</div>
+
+{% if action is defined %}
+	{% if action == "results" %}
+	<div class="row">
+		<div class="col">
+			<!-- Card for Image files WITHOUT EXIF Dates -->
+			<div class="card">
+				<div class="card-header bg-primary text-white">
+					<button class="btn text-white" type="button" data-bs-toggle="collapse" data-bs-target="#collapseNonExifImages" aria-expanded="true" aria-controls="collapseNonExifImages">
+						<i class="fa-solid fa-caret-down"></i>
+					</button>
+					<strong>
+						Image files <i>without</i> EXIF Date
+					</strong>
+				</div>
+				<div class="collapse show" id="collapseNonExifImages">
+					<div class="card-body">
+						<strong>Bulk Selections</strong><BR>
+						<!-- open modal for Do Not Write Dates to All -->
+						<button class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#doNotWriteDatesModal">
+							<i class="fa-solid fa-file-circle-minus"></i>&nbsp; Do Not Write Dates to All
+						</button>
+						<!-- open modal for Delete All -->
+						<button class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteAllModal">
+							<i class="fa-solid fa-file-circle-xmark"></i>&nbsp; Delete All
+						</button>
+						<br><br>
+						<!-- open modal for File Date for All -->
+						<button class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#fileDateWriteDatesModal">
+							<i class="fa-solid fa-file-signature"></i>&nbsp; Use File Date for All
+						</button>
+						<!-- open modal for File Name for All -->
+						<button class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#fileNameWriteDatesModal">
+							<i class="fa-solid fa-file-signature"></i>&nbsp; Use File Name Date for All
+						</button>
+						<!-- open modal for Path Name for All -->
+						<button class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#pathNameWriteDatesModal">
+							<i class="fa-solid fa-file-signature"></i>&nbsp; Use Path Name Date for All
+						</button>
+						<br><br>
+						<!-- open modal for Start Date for All -->
+						<button class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#startDateWriteDatesModal">
+							<i class="fa-solid fa-file-signature"></i>&nbsp; Use Start Date for All
+						</button>
+						<!-- open modal for End Date for All -->
+						<button class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#endDateWriteDatesModal">
+							<i class="fa-solid fa-file-signature"></i>&nbsp; Use End Date for All
+						</button>
+						<!-- open modal for Select Date to Write to All -->
+						<button class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#selectDateModal">
+							<i class="fa-solid fa-file-signature"></i>&nbsp; Select Date to Write to All
+						</button>
+						<br><br>
+						<strong>Actions</strong><BR>
+						<!-- open modal for Submit All -->
+						<button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#submitAllModal">
+							<i class="fa-solid fa-file-circle-check"></i>&nbsp; Submit All
+						</button>
+						<br>
+						<br>
+						<table class="table align-middle">
+							<thead>
+								<tr>
+									<th scope="col">Thumbnail</th>
+									<th scope="col">File Name</th>
+									<th scope="col">File Path</th>
+									<th scope="col">File Date</th>
+									<th scope="col">Actions</th>
+								</tr>
+							</thead>
+							<tbody>
+								{% for file in import_data['files_without_dates'] %}
+									{{ file_info_row(file) }}
+								{% endfor %}
+							</tbody>
+						</table>
+					</div>
+					<div class="card-footer d-flex justify-content-end">
+						<!-- open modal for Submit All -->
+						<button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#submitAllModal">
+							<i class="fa-solid fa-file-circle-check"></i>&nbsp; Submit All
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="row">
+		&nbsp;
+	</div>
+	<div class="row">
+		<div class="col">
+			<!-- Card for Image files WITH EXIF Dates -->
+			<div class="card">
+				<div class="card-header">
+					<button class="btn btn-link" type="button" data-bs-toggle="collapse" data-bs-target="#collapseExifImages" aria-expanded="false" aria-controls="collapseExifImages">
+						<i class="fa-solid fa-caret-down"></i>
+					</button>
+					Image files <i>with</i> EXIF Date
+				</div>
+				<div class="collapse" id="collapseExifImages">
+					<div class="card-body">
+						<table class="table align-middle">
+							<thead>
+								<tr>
+									<th scope="col">Thumbnail</th>
+									<th scope="col">File Name</th>
+									<th scope="col">File Path</th>
+									<th scope="col">File Date</th>
+									<th scope="col">EXIF Date</th>
+									<th scope="col">Guessed Dates</th>
+								</tr>
+							</thead>
+							<tbody>
+								{% for file in import_data['files_with_dates'] %}
+								<tr>
+									<td>
+										{% if settings['ui']['show_all_thumbnails'] %}
+										<a href="#" data-bs-toggle="modal" data-bs-target="#imageModal" onclick="showImage('{{ url_for('static', filename='img/' + file['image_link']) }}', '{{ file['filename'] }}')">
+											<img src="{{ url_for('static', filename='img/' + file['image_link']) }}" class="img-thumbnail" style="width: 100px; height: auto;">
+										</a>
+										{% else %}
+										<i class="fa-solid fa-file-image"></i>
+										{% endif %}
+									</td>
+									<td>{{ file['filename'] }}</td>
+									<td>{{ file['path'] | replace('./static/img', '') }}</td>
+									<td>{{ file['file_date'] }}</td>
+									<td>{{ file['date'] }}</td>
+									<td>
+										{% if file['guessed_dates']['filedate'] %}
+										<strong>File Date:</strong> {{ file['guessed_dates']['filedate'] }}<br>
+										{% endif %}
+										{% if file['guessed_dates']['filename'] %}
+										<strong>File Name:</strong> {{ file['guessed_dates']['filename'] }}<br>
+										{% endif %}
+										{% if file['guessed_dates']['pathname'] %}
+										<strong>Path Name:</strong> {{ file['guessed_dates']['pathname'] }}<br>
+										{% endif %}
+									</td>
+								</tr>
+								{% endfor %}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+	<div class="row">
+		&nbsp;
+	</div>
+	<div class="row">
+		<div class="col">
+			<!-- Card for Ignored Files -->
+			<div class="card">
+				<div class="card-header">
+					<button class="btn btn-link" type="button" data-bs-toggle="collapse" data-bs-target="#collapseIgnored" aria-expanded="false" aria-controls="collapseIgnored">
+						<i class="fa-solid fa-caret-down"></i>
+					</button>
+					Ignored Files 
+				</div>
+				<div class="collapse" id="collapseIgnored">
+					<div class="card-body">
+						<table class="table align-middle">
+							<thead>
+								<tr>
+									<th scope="col">Thumbnail</th>
+									<th scope="col">File Name</th>
+									<th scope="col">File Path</th>
+									<th scope="col">File Date</th>
+									<th scope="col">Actions</th>
+								</tr>
+							</thead>
+							<tbody>
+								{% for file in import_data['ignored_files'] %}
+								<tr>	
+									<td>
+										<i class="fa-solid fa-file-circle-question"></i>
+									</td>
+									<td>{{ file['filename'] }}</td>
+									<td>{{ file['path'] | replace('./static/img', '') }}</td>
+									<td>{{ file['file_date'] }}</td>
+									<td></td>
+								</tr>
+								{% endfor %}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+	<!-- Single Modal Structure -->
+	<div class="modal fade" id="imageModal" tabindex="-1" aria-labelledby="imageModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="imageModalLabel"></h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					<img id="modalImage" src="" class="img-fluid">
+				</div>
+			</div>
+		</div>
+	</div>
+	<!-- Modal for 'Do Not Write Dates to All' - Confirmation -->
+	<div class="modal fade" id="doNotWriteDatesModal" tabindex="-1" aria-labelledby="doNotWriteDatesModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="doNotWriteDatesModalLabel">Do Not Write Dates to All</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					Are you sure you want to proceed with this action?
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="button" class="btn btn-primary" onclick="setAllRadio('ignore');" data-bs-dismiss="modal">Proceed</button>
+				</div>
+			</div>
+		</div>
+	</div>
+	<!-- Modal for 'Select Date to Write to All' - Date Picker and Confirmation -->
+	<div class="modal fade" id="selectDateModal" tabindex="-1" aria-labelledby="selectDateModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="selectDateModalLabel">Select Date to Write to All</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					<input type="date" class="form-control" id="selectDateModalBulk">
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="button" class="btn btn-primary" onclick="setAllRadio('custom');" data-bs-dismiss="modal">Proceed</button>
+				</div>
+			</div>
+		</div>
+	</div>
+	<!-- Modal for 'Delete All' - Confirmation -->
+	<div class="modal fade" id="deleteAllModal" tabindex="-1" aria-labelledby="deleteAllModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="deleteAllModalLabel">Delete All</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					Are you sure you want to proceed with this action? <br><br>
+					<div class="alert alert-danger" role="alert">
+						<i class="fa-solid fa-exclamation-triangle"></i>&nbsp; All files will be marked to be deleted from the import folder.
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="button" class="btn btn-primary" onclick="setAllRadio('delete');" data-bs-dismiss="modal">Proceed</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Modal for 'Submit All' - Confirmation -->
+	<div class="modal fade" id="submitAllModal" tabindex="-1" aria-labelledby="submitAllModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="submitAllModalLabel">Submit All</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					Are you sure you want to proceed with this action? <br><br>
+					<div class="alert alert-warning" role="alert">
+						<i class="fa-solid fa-exclamation-triangle"></i>&nbsp; All files currently in the export folder will be deleted prior to the processing of files in the import folder.
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="button" class="btn btn-primary" onclick="submitAllSelected();" data-bs-dismiss="modal">Proceed</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Modal for 'Write Start Date to All' - Confirmation -->
+	<div class="modal fade" id="startDateWriteDatesModal" tabindex="-1" aria-labelledby="startDateWriteDatesModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="startDateWriteDatesModalLabel">Write Start Date to All</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					Are you sure you want to proceed with this action? <br><br>
+					<div class="alert alert-warning" role="alert">
+						<i class="fa-solid fa-exclamation-triangle"></i>&nbsp; All files that have a valid <strong>start date</strong> option will be selected.
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="button" class="btn btn-primary" onclick="setAllRadio('startdate');" data-bs-dismiss="modal">Proceed</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Modal for 'Write End Date to All' - Confirmation -->
+	<div class="modal fade" id="endDateWriteDatesModal" tabindex="-1" aria-labelledby="endDateWriteDatesModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="endDateWriteDatesModalLabel">Write End Date to All</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					Are you sure you want to proceed with this action? <br><br>
+					<div class="alert alert-warning" role="alert">
+						<i class="fa-solid fa-exclamation-triangle"></i>&nbsp; All files that have a valid <strong>end date</strong> option will be selected.
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="button" class="btn btn-primary" onclick="setAllRadio('enddate');" data-bs-dismiss="modal">Proceed</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Modal for 'Write File Date to All' - Confirmation -->
+	<div class="modal fade" id="fileDateWriteDatesModal" tabindex="-1" aria-labelledby="fileDateWriteDatesModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="fileDateWriteDatesModalLabel">Write File Date to All</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					Are you sure you want to proceed with this action? <br><br>
+					<div class="alert alert-warning" role="alert">
+						<i class="fa-solid fa-exclamation-triangle"></i>&nbsp; All files that have a valid <strong>file date</strong> option will be selected.
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="button" class="btn btn-primary" onclick="setAllRadio('filedate');" data-bs-dismiss="modal">Proceed</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Modal for 'Write File Name to All' - Confirmation -->
+	<div class="modal fade" id="fileNameWriteDatesModal" tabindex="-1" aria-labelledby="fileNameWriteDatesModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="fileNameWriteDatesModalLabel">Write File Name Date to All</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					Are you sure you want to proceed with this action? <br><br>
+					<div class="alert alert-warning" role="alert">
+						<i class="fa-solid fa-exclamation-triangle"></i>&nbsp; All files that have a valid <strong>file name date</strong> option will be selected.
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="button" class="btn btn-primary" onclick="setAllRadio('filename');" data-bs-dismiss="modal">Proceed</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Modal for 'Write Path Name to All' - Confirmation -->
+	<div class="modal fade" id="pathNameWriteDatesModal" tabindex="-1" aria-labelledby="pathNameWriteDatesModalLabel" aria-hidden="true">
+		<div class="modal-dialog modal-dialog-centered">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h5 class="modal-title" id="pathNameWriteDatesModalLabel">Write Path Name Date to All</h5>
+					<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+				</div>
+				<div class="modal-body">
+					Are you sure you want to proceed with this action? <br><br>
+					<div class="alert alert-warning" role="alert">
+						<i class="fa-solid fa-exclamation-triangle"></i>&nbsp; All files that have a valid <strong>path name date</strong> option will be selected.
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+					<button type="button" class="btn btn-primary" onclick="setAllRadio('pathname');" data-bs-dismiss="modal">Proceed</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<script>
+		function showImage(imageUrl, imageTitle) {
+			document.getElementById('modalImage').src = imageUrl;
+			document.getElementById('imageModalLabel').innerText = imageTitle;
+		}
+	</script>
+	{% endif %}
+{% else %}
+	<div class="alert alert-warning" role="alert">
+		<i class="fa-solid fa-exclamation-triangle"></i>&nbsp; No action defined. Please go back and try again.
+	</div>
+{% endif %}
+
+

@@ -1,0 +1,132 @@
+{% from "macros.html" import back_button %}
+
+<div class="row gy-1">
+	{{ back_button("selectfolder") }}
+</div>
+<div class="row gy-1">
+	<div class="card">
+		<div class="card-body">
+			{% if action is defined %}
+				{% if action == "copy" %}
+				<div class="row gy-2 text-center">
+					<h3>Copying Files and Folders...</h3>
+				</div>
+				<div class="row gy-2">
+					<div class="progress" role="progressbar" aria-label="Copying Files & Folders" aria-valuenow="{{ percent_complete }}" aria-valuemin="0" aria-valuemax="100" style="height: 40px">
+						<div class="progress-bar progress-bar-striped progress-bar-animated" style="width: {{ percent_complete }}%" id="copy_progress_percent">{{ percent_complete }}%</div>
+					</div>
+				</div>
+				<div class="row gy-2 text-center">
+					&nbsp;
+				</div>
+				<div class="d-flex justify-content-center">
+					<a href="/" type="button" class="btn btn-outline-warning">
+						<i class="fa-solid fa-ban"></i>&nbsp; Cancel Action
+					</a>
+				</div>
+				<script>
+					// Update Progress Bar
+					postdata = {
+						"action": "copy_progress",
+						"task_id": "{{ task_id }}"
+					};
+					var copy_interval = setInterval(function() {
+						$.ajax({
+							url: "/importfolder",
+							type: "POST",
+							data: postdata,
+							success: function(data) {
+								//console.log(data);
+								var progress = Math.floor(data.progress);
+								$("#copy_progress_percent").css("width", progress + "%");
+								$("#copy_progress_percent").text(progress + "%");
+								if (data.progress == 100) {
+									clearInterval(copy_interval);
+									importFolder('range', '{{ originals_path }}');
+								}
+							}
+						});
+					}, 200);
+				</script>
+
+				{% elif action == "range" %}
+				<!-- Date Range Pickers -->
+				<div class="row gy-2 text-center">
+					<h3>Enter range of possible dates for the folder being analyzed and processed.</h3>
+				</div>
+				<div class="row gy-2">
+					<div class="col">
+						<label for="start_date" class="form-label">Start Date</label>
+						<input type="date" class="form-control" id="start_date" name="start_date">
+					</div>
+					<div class="col">
+						<label for="end_date" class="form-label">End Date</label>
+						<input type="date" class="form-control" id="end_date" name="end_date">
+					</div>
+					<script>
+						document.addEventListener('DOMContentLoaded', function() {
+							var today = new Date().toISOString().split('T')[0];
+							document.getElementById('end_date').value = today;
+						});
+					</script>
+				</div>
+				<div class="row gy-2">
+					&nbsp;
+				</div>
+				<div class="row gy-2">
+					<button class="btn btn-outline-primary" onclick="importFolder('analyze', '{{ originals_path }}');">
+						<i class="fa-solid fa-wand-magic-sparkles"></i>&nbsp; Analyze
+					</button>
+				</div>
+				{% elif action == "analyze" %}
+				<div class="row gy-2 text-center">
+					<h3>Analyzing Folder...</h3>
+				</div>
+				<div class="row gy-2">
+					<div class="progress" role="progressbar" aria-label="Analyzing" aria-valuenow="{{ percent_complete }}" aria-valuemin="0" aria-valuemax="100" style="height: 40px">
+						<div class="progress-bar progress-bar-striped progress-bar-animated" style="width: {{ percent_complete }}%" id="analyze_progress_percent">{{ percent_complete }}%</div>
+					</div>
+				</div>
+				<div class="row gy-2 text-center">
+					&nbsp;
+				</div>
+				<div class="d-flex justify-content-center">
+					<a href="/" type="button" class="btn btn-outline-warning">
+						<i class="fa-solid fa-ban"></i>&nbsp; Cancel Action
+					</a>
+				</div>
+				<script>
+					// Update Progress Bar
+					postdata = {
+						"action": "analyze_progress",
+						"task_id": "{{ task_id }}"
+					};
+					var analyze_interval = setInterval(function() {
+						$.ajax({
+							url: "/importfolder",
+							type: "POST",
+							data: postdata,
+							success: function(data) {
+								//console.log(data);
+								var progress = Math.floor(data.progress);
+								$("#analyze_progress_percent").css("width", progress + "%");
+								$("#analyze_progress_percent").text(progress + "%");
+								if (data.progress == 100) {
+									clearInterval(analyze_interval);
+									fixFiles('results', '{{ task_id }}');
+								}
+							}
+						});
+					}, 200);
+				</script>
+				{% endif %}
+			{% else %}
+				<!-- Alert No Action Selected -->
+				<div class="alert alert-warning" role="alert">
+					<i class="fa-solid fa-exclamation-triangle"></i>&nbsp; No action selected.
+				</div>
+			{% endif %}
+			<br>
+		</div>
+	</div>
+</div>

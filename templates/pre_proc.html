@@ -1,0 +1,80 @@
+{% from "macros.html" import back_button %}
+<!-- Global Back Button -->
+<div class="row">
+	{{ back_button("home") }}
+</div>
+
+<div class="row">
+	&nbsp;
+</div>
+
+<div class="row" id="gotoImport" style="display: none;">
+    <button class="btn btn-outline-success" onclick="importFolder('range', '{{ import_folder }}');">
+        <i class="fa-solid fa-file-import"></i>&nbsp; All Finished! Start with Import Folder
+    </button>
+    <br><br>
+    &nbsp;
+</div>  
+
+<div class="row">
+    <div class="col">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <strong>
+                    Pre-Processing Stream: 
+                    <span id="preProcWorking" style="color:yellow">
+                        <i>&nbsp;Working&nbsp;</i>
+                        <div class="spinner-border spinner-border-sm" role="status">
+                            <span class="visually-hidden">...</span>
+                        </div>  
+                    </span>
+                    <span id="preProcDone" style="display: none; color:#33ff00;">
+                        <i>&nbsp;Done&nbsp;</i>
+                        <i class="fa-regular fa-thumbs-up"></i>
+                    </span>
+                </strong>
+            </div>
+
+            <div class="card-body">
+                <style>
+                    #output {
+                        white-space: pre;
+                        font-family: monospace;
+                        background: #000000;
+                        padding: 1em;
+                        border: 1px solid #585858;
+                        height: 600px;
+                        overflow-y: auto;
+                        color: #33ff00
+                    }
+                </style>
+                <div id="output"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const output = document.getElementById('output');
+
+    const params = new URLSearchParams({
+        script_arg: '{{ folder_path}}'
+    });
+    const eventSourcePreProc = new EventSource(`/stream/preprocess?${params.toString()}`);
+    
+    eventSourcePreProc.onmessage = function(e) {
+        // Parse the JSON-encoded data and append it
+        const text = JSON.parse(e.data);
+        output.textContent += text;
+        output.scrollTop = output.scrollHeight;
+    };
+    
+    eventSourcePreProc.onerror = function(e) {
+        output.textContent += '\nConnection closed\n';
+        eventSourcePreProc.close();
+        // Do something
+        $('#preProcWorking').hide();
+        $('#preProcDone').show();
+        $('#gotoImport').show();
+    };
+</script>

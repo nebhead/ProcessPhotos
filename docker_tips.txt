@@ -1,0 +1,27 @@
+# This builds and runs based on the docker compose file
+sudo docker compose up --build
+
+# This builds and pushes to docker hub
+sudo docker build -t processphotos:0.1.4 .
+
+sudo docker login
+
+sudo docker tag processphotos:0.1.4 nebhead/processphotos:0.1.4
+
+sudo docker tag processphotos:0.1.4 nebhead/processphotos:latest
+
+sudo docker push nebhead/processphotos:0.1.4
+
+sudo docker push nebhead/processphotos:latest
+
+# Find out the name of the container that is running:
+sudo docker ps
+
+# Entering the container:
+sudo docker exec -it processphotos-web-1 /bin/bash
+
+# Pruning images:
+sudo docker system prune -a
+
+# List images:
+sudo docker images
