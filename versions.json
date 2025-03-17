@@ -2,8 +2,8 @@
     "versions": {
         "exiftool": "11.16",
         "exiftool_date" : "Oct. 26, 2018",
-        "server_base": "0.1.5",
-        "server_build": 2,
+        "server_base": "0.1.6",
+        "server_build": 0,
         "sortphotos": "2020-12-22",
         "sortphotos_commit": "9037913957f604f7453d8e7b02570cfbb7c2a86d"
     }
