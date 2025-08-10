@@ -429,19 +429,34 @@ def run_script(action, path='originals'):
 		[command, script_path, arguments],
 		stdout=subprocess.PIPE,
 		stderr=subprocess.STDOUT,
-		universal_newlines=True
+		universal_newlines=True,
+		start_new_session=True  # This ensures the process runs in its own session
 	)
 
-	while True:
-		output = process.stdout.readline()
-		if output == '' and process.poll() is not None:
-			break
-		if output:
-			yield f"data: {json.dumps(output)}\n\n"
+	def stream_output():
+		try:
+			while True:
+				output = process.stdout.readline()
+				if output == '' and process.poll() is not None:
+					break
+				if output:
+					try:
+						yield f"data: {json.dumps(output)}\n\n"
+					except Exception as e:
+						logger.error(f"Error yielding output: {e}")
+						continue
 
-	rc = process.poll()
-	output = f'Script finished with return code {rc}'
-	yield f"data: {json.dumps(output)}\n\n"
+			rc = process.poll()
+			try:
+				yield f"data: {json.dumps(f'Script finished with return code {rc}')}\n\n"
+			except Exception as e:
+				logger.error(f"Error yielding final status: {e}")
+		except Exception as e:
+			logger.error(f"Error in stream_output: {e}")
+			# Even if streaming fails, let the process continue running
+			process.wait()
+
+	return stream_output()
 
 @app.route('/stream')
 @app.route('/stream/<action>')
