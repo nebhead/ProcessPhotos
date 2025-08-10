@@ -150,6 +150,11 @@ def default_settings():
 		}
 	}
 
+	settings['backup'] = {
+		'retention_days': 7,
+		'enabled': True
+	}
+
 	return settings
 
 def read_settings(filename=f'{CONFIG_FOLDER}settings.json', init=False, retry_count=0):
@@ -467,6 +472,9 @@ def write_folder_status(folder_status, path='config/folders.json'):
 							json.dump(existing, f, indent=2)
 						event = f"Created backup of folder status at {backup_path}"
 						write_log(event)
+						
+						# Clean up old backups
+						cleanup_old_backups(path)
 			except Exception as e:
 				event = f"Warning: Could not create backup: {e}"
 				write_log(event)
@@ -545,4 +553,128 @@ def semantic_ver_is_lower(version_A, version_B):
 			elif version_A [2] > version_B[2]:
 				return False
 	return False
+
+def list_available_backups(path):
+	"""
+	List all available backups for a given file
+
+	:param path: Path to the main JSON file (not the backup)
+	:return: List of dictionaries containing backup information, sorted by date (newest first)
+	"""
+	backups = []
+	try:
+		directory = os.path.dirname(path)
+		base_name = os.path.basename(path)
+		
+		if directory == "":
+			directory = "."
+			
+		for filename in os.listdir(directory):
+			if filename.startswith(base_name) and filename.endswith('.bak'):
+				try:
+					# Extract timestamp from filename
+					timestamp_str = filename.split('.')[-2]
+					file_date = datetime.datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+					
+					backup_path = os.path.join(directory, filename)
+					file_size = os.path.getsize(backup_path)
+					
+					backups.append({
+						'filename': filename,
+						'path': backup_path,
+						'date': file_date,
+						'size': file_size
+					})
+				except (ValueError, IndexError):
+					continue
+					
+		# Sort backups by date, newest first
+		backups.sort(key=lambda x: x['date'], reverse=True)
+		
+	except Exception as e:
+		event = f"Error listing backup files: {e}"
+		write_log(event)
+		
+	return backups
+
+def restore_backup(backup_path, target_path=None):
+	"""
+	Restore a backup file to its original location or a specified target
+
+	:param backup_path: Path to the backup file to restore
+	:param target_path: Optional path to restore to (if None, derives from backup name)
+	:return: True if successful, False otherwise
+	"""
+	try:
+		if target_path is None:
+			# Remove the timestamp and .bak from the backup filename
+			parts = backup_path.split('.')
+			target_path = '.'.join(parts[:-2])
+		
+		# Create a backup of the current file before restoring
+		if os.path.exists(target_path):
+			write_folder_status(read_folder_status(target_path), target_path)
+			
+		# Restore the backup
+		with open(backup_path, 'r') as source:
+			data = json.load(source)
+			with open(target_path, 'w') as target:
+				json.dump(data, target, indent=2)
+				
+		event = f"Restored backup from {backup_path} to {target_path}"
+		write_log(event)
+		return True
+		
+	except Exception as e:
+		event = f"Error restoring backup: {e}"
+		write_log(event)
+		return False
+
+def cleanup_old_backups(path, days=None):
+	"""
+	Clean up backup files older than specified number of days
+
+	:param path: Path to the main JSON file (not the backup)
+	:param days: Optional number of days to keep backups (if None, uses settings value)
+	"""
+	# Read settings to get retention period
+	settings = read_settings()
+	if not settings['backup']['enabled']:
+		return
+		
+	if days is None:
+		days = settings['backup']['retention_days']
+	try:
+		# Get the directory and base filename
+		directory = os.path.dirname(path)
+		base_name = os.path.basename(path)
+		
+		# Get current time
+		now = datetime.datetime.now()
+		
+		# Look for backup files
+		if directory == "":
+			directory = "."
+		for filename in os.listdir(directory):
+			if filename.startswith(base_name) and filename.endswith('.bak'):
+				try:
+					# Extract timestamp from filename (format: YYYYMMDD_HHMMSS)
+					timestamp_str = filename.split('.')[-2]  # Get the timestamp part
+					file_date = datetime.datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+					
+					# Calculate age in days
+					age = now - file_date
+					
+					# Remove if older than specified days
+					if age.days > days:
+						file_path = os.path.join(directory, filename)
+						os.remove(file_path)
+						event = f"Removed old backup file: {filename}"
+						write_log(event)
+				except (ValueError, IndexError):
+					# Skip files that don't match our timestamp format
+					continue
+	except Exception as e:
+		event = f"Error cleaning up backup files: {e}"
+		write_log(event)
 
