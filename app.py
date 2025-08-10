@@ -562,7 +562,7 @@ def get_folder_data(path='originals'):
 	 	'name' : folder,
 		'num_folders' : number of subfolders in this folder,
 		'num_files' : number of files in this folder,
-		'processed' : True/False
+		'processed' : True/False/None (None indicates partially processed)
 	 }
 	'''
 	#print(f'path: {path}') # DEBUG
@@ -590,11 +590,30 @@ def get_folder_data(path='originals'):
 				subfolder_target = subfolder_target[path_list[index]]['subfolders']
 
 		for subfolder, data in subfolder_target.items():
+			# Check if any subfolders are processed
+			processed_status = data['processed']
+			if data['subfolders']:
+				has_processed = False
+				has_unprocessed = False
+				for _, sub_data in data['subfolders'].items():
+					if sub_data['processed']:
+						has_processed = True
+					else:
+						has_unprocessed = True
+					if has_processed and has_unprocessed:
+						break
+				# If we have both processed and unprocessed subfolders, mark as partially processed
+				if has_processed and has_unprocessed:
+					processed_status = None
+				# If parent isn't processed but all subfolders are, mark as partially processed
+				elif not data['processed'] and has_processed and not has_unprocessed:
+					processed_status = None
+
 			folder_dict = {
 				'name' : subfolder,
 				'num_folders' : data['num_subfolders'],
 				'num_files' : data['num_files'],
-				'processed' : data['processed']
+				'processed' : processed_status
 			}
 			folder_details.append(folder_dict)
 

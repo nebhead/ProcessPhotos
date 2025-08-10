@@ -149,20 +149,25 @@ function preprocessFolder(action, folder_path) {
 	$('#process_working_row').load('/preproc', senddata).fadeIn(500);
 }
 
-function toggleProcessed(pathID, path, flag) {
-	console.log(pathID);
-	console.log(path);
-	console.log(flag);
+function toggleProcessed(pathID, path, state) {
+	console.log('Toggle processed:', pathID, path, state);
 	
-	if (flag == 'True') {
-		var toggled = false;
+	// Determine the next state based on current state
+	let newState, newFlag;
+	if (state === 'partial') {
+		newState = 'true';
+		newFlag = true;
+	} else if (state === 'true') {
+		newState = 'false';
+		newFlag = false;
 	} else {
-		var toggled = true;
+		newState = 'true';
+		newFlag = true;
 	}
 	
 	const post_data = {
 		'path' : path,
-		'flag' : toggled
+		'flag' : newFlag
 	}
 
 	// Ajax post to /toggle_processed
@@ -173,12 +178,16 @@ function toggleProcessed(pathID, path, flag) {
 		contentType: 'application/json',
 		success: function(response) {
 			console.log('Success:', response);
-			if (flag == 'False') {
-				document.getElementById(pathID).innerHTML = '<i class="fa-solid fa-circle-check text-success"></i>';
-				document.getElementById(pathID).setAttribute('value', 'True');
+			const element = document.getElementById(pathID);
+			if (newState === 'true') {
+				element.innerHTML = '<i class="fa-solid fa-circle-check text-success"></i>';
+				element.setAttribute('data-state', 'true');
+			} else if (newState === 'partial') {
+				element.innerHTML = '<i class="fa-solid fa-circle-half-stroke text-warning"></i>';
+				element.setAttribute('data-state', 'partial');
 			} else {
-				document.getElementById(pathID).innerHTML = '<i class="fa-solid fa-circle-xmark text-danger"></i>';
-				document.getElementById(pathID).setAttribute('value', 'False');
+				element.innerHTML = '<i class="fa-solid fa-circle-xmark text-danger"></i>';
+				element.setAttribute('data-state', 'false');
 			}
 		},
 		error: function(error) {

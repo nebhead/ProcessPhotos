@@ -18,3 +18,5 @@ venv/
 logs/app.log
 
 lt.sh
+
+*.log

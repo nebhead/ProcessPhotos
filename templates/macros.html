@@ -29,9 +29,11 @@
 	<td><h3>{{ folder_info['num_folders'] }}</h3></td>
 	<td><h3>{{ folder_info['num_files'] }}</h3></td>
 	<td>
-		<h3 id="processed_{{ folder_info['name'] }}" value="{{ folder_info['processed'] }}" onclick="toggleProcessed('processed_{{ folder_info['name'] }}', '{{ current_path }}/{{ folder_info['name'] }}', this.getAttribute('value'))">
-			{% if folder_info['processed'] %}
+		<h3 id="processed_{{ folder_info['name'] }}" data-state="{{ 'partial' if folder_info['processed'] == none else 'true' if folder_info['processed'] else 'false' }}" onclick="toggleProcessed('processed_{{ folder_info['name'] }}', '{{ current_path }}/{{ folder_info['name'] }}', this.getAttribute('data-state'))">
+			{% if folder_info['processed'] == true %}
 				<i class="fa-solid fa-circle-check text-success"></i>
+			{% elif folder_info['processed'] == none %}
+				<i class="fa-solid fa-circle-half-stroke text-warning"></i>
 			{% else %}
 				<i class="fa-solid fa-circle-xmark text-danger"></i>
 			{% endif %}
