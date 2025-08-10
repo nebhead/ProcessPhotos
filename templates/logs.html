@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}View Logs{% endblock %}
+{% block content %}
+<div class="container">
+    <div class="row">
+        <div class="col">
+            <h2>Log Viewer</h2>
+            <div class="card">
+                <div class="card-header">
+                    <div class="row">
+                        <div class="col">
+                            <h5 class="card-title mb-0">Log Files</h5>
+                        </div>
+                        <div class="col text-end">
+                            <form method="get" class="d-inline">
+                                <select class="form-select" onchange="window.location.href=this.value">
+                                    {% for log_file in log_files %}
+                                    <option value="{{ url_for('logs', filename=log_file) }}" {% if current_log == log_file %}selected{% endif %}>
+                                        {{ log_file }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <pre class="bg-dark text-light p-3" style="max-height: 600px; overflow-y: auto;">{{ log_content }}</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

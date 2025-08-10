@@ -1025,6 +1025,39 @@ def get_unique_id():
 	""" Generate a unique ID for a task. """
 	return str(uuid.uuid4())
 
+@app.route('/logs')
+@app.route('/logs/<filename>')
+def logs(filename=None):
+    """View log files in the logs directory"""
+    # Get list of all .log files in the logs directory
+    log_files = []
+    for file in os.listdir('logs'):
+        if file.endswith('.log'):
+            log_files.append(file)
+    
+    # Sort log files with app.log first, then by name
+    log_files.sort(key=lambda x: (x != 'app.log', x))
+    
+    # If no filename specified, use app.log or the first log file found
+    if not filename:
+        filename = 'app.log' if 'app.log' in log_files else (log_files[0] if log_files else None)
+    
+    # Read the selected log file
+    log_content = ''
+    if filename and filename in log_files:
+        try:
+            with open(os.path.join('logs', filename), 'r') as f:
+                log_content = f.read()
+        except Exception as e:
+            logger.error(f"Error reading log file {filename}: {e}")
+            log_content = f"Error reading log file: {str(e)}"
+    
+    return render_template('logs.html', 
+                         settings=settings,
+                         log_files=log_files,
+                         current_log=filename,
+                         log_content=log_content)
+
 """
 Run Flask App
 """
