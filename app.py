@@ -623,6 +623,23 @@ def get_folder_data(path='originals'):
 		'processed' : True/False/None (None indicates partially processed)
 	 }
 	'''
+	def check_processed_status(folder_data):
+		"""Recursively check the processed status of a folder and all its subfolders"""
+		if not folder_data['subfolders']:
+			return folder_data['processed'], folder_data['processed']
+
+		all_processed = folder_data['processed']
+		has_processed = folder_data['processed']
+		has_unprocessed = not folder_data['processed']
+
+		for _, sub_data in folder_data['subfolders'].items():
+			sub_all_processed, sub_has_processed = check_processed_status(sub_data)
+			all_processed = all_processed and sub_all_processed
+			has_processed = has_processed or sub_has_processed
+			has_unprocessed = has_unprocessed or not sub_all_processed
+
+		return all_processed, has_processed
+
 	#print(f'path: {path}') # DEBUG
 	folder_details = []
 	try:
@@ -648,24 +665,15 @@ def get_folder_data(path='originals'):
 				subfolder_target = subfolder_target[path_list[index]]['subfolders']
 
 		for subfolder, data in subfolder_target.items():
-			# Check if any subfolders are processed
-			processed_status = data['processed']
-			if data['subfolders']:
-				has_processed = False
-				has_unprocessed = False
-				for _, sub_data in data['subfolders'].items():
-					if sub_data['processed']:
-						has_processed = True
-					else:
-						has_unprocessed = True
-					if has_processed and has_unprocessed:
-						break
-				# If we have both processed and unprocessed subfolders, mark as partially processed
-				if has_processed and has_unprocessed:
-					processed_status = None
-				# If parent isn't processed but all subfolders are, mark as partially processed
-				elif not data['processed'] and has_processed and not has_unprocessed:
-					processed_status = None
+			# Check the processed status recursively through all subfolders
+			all_processed, has_processed = check_processed_status(data)
+			
+			if all_processed:
+				processed_status = True
+			elif has_processed:
+				processed_status = None  # Partially processed
+			else:
+				processed_status = False
 
 			folder_dict = {
 				'name' : subfolder,
