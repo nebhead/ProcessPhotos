@@ -25,6 +25,10 @@ from exif.exif import *
 from typing import Dict
 from datetime import datetime, timezone
 
+class ProcessRunningError(Exception):
+    """Raised when attempting to start a script while another is running"""
+    pass
+
 """
 Globals
 """
@@ -35,6 +39,29 @@ import_data = []
 
 IMPORT_FOLDER = settings['folders']['import']
 EXPORT_FOLDER = settings['folders']['export']
+
+# Track background processes
+class ProcessTracker:
+    def __init__(self):
+        self._processes = set()
+        self._lock = threading.Lock()
+        
+    def add_process(self, process):
+        with self._lock:
+            self._processes.add(process)
+            
+    def remove_process(self, process):
+        with self._lock:
+            if process in self._processes:
+                self._processes.remove(process)
+                
+    def has_running_processes(self):
+        with self._lock:
+            # Clean up finished processes first
+            self._processes = {p for p in self._processes if p.poll() is None}
+            return len(self._processes) > 0
+
+process_tracker = ProcessTracker()
 
 # Thread-safe progress tracking
 class ProgressTracker:
@@ -414,6 +441,11 @@ def post_process():
 
 def run_script(action, path='originals'):
 	global settings
+	global process_tracker
+
+	# Check if there are any running processes before starting a new one
+	if process_tracker.has_running_processes():
+		raise ProcessRunningError("Another script is currently running. Please wait for it to complete.")
 
 	if action == 'preprocess':
 		command = settings['scripts']['pre_proc']['type']
@@ -432,6 +464,9 @@ def run_script(action, path='originals'):
 		universal_newlines=True,
 		start_new_session=True  # This ensures the process runs in its own session
 	)
+	
+	# Track this process
+	process_tracker.add_process(process)
 
 	def stream_output():
 		try:
@@ -451,29 +486,52 @@ def run_script(action, path='originals'):
 				yield f"data: {json.dumps(f'Script finished with return code {rc}')}\n\n"
 			except Exception as e:
 				logger.error(f"Error yielding final status: {e}")
+			finally:
+				# Remove from tracker when done
+				process_tracker.remove_process(process)
 		except Exception as e:
 			logger.error(f"Error in stream_output: {e}")
 			# Even if streaming fails, let the process continue running
 			process.wait()
+			# Make sure process is removed from tracker
+			process_tracker.remove_process(process)
 
 	return stream_output()
 
 @app.route('/stream')
 @app.route('/stream/<action>')
 def stream(action=None):
+	global process_tracker
+	
+	if process_tracker.has_running_processes():
+		return jsonify({
+			'error': True,
+			'message': 'Another script is currently running. Please wait for it to complete.'
+		}), 409  # HTTP 409 Conflict
+	
 	path = request.args.get('script_arg', 'originals')
-	#print(f'Path: {path}')
+	
+	try:
+		if action == 'preprocess':
+			return Response(
+				run_script('preprocess', path=path),
+				mimetype='text/event-stream'
+			)
+		else: 
+			return Response(
+				run_script('postprocess'),
+				mimetype='text/event-stream'
+			)
+	except ProcessRunningError as e:
+		return jsonify({
+			'error': True,
+			'message': str(e)
+		}), 409
 
-	if action == 'preprocess':
-		return Response(
-			run_script('preprocess', path=path),
-			mimetype='text/event-stream'
-		)
-	else: 
-		return Response(
-			run_script('postprocess'),
-			mimetype='text/event-stream'
-		)
+@app.route('/check_running_processes')
+def check_running_processes():
+	global process_tracker
+	return jsonify({'has_running_processes': process_tracker.has_running_processes()})
 
 @app.route('/toggle_processed', methods=['POST'])
 def toggle_processed():

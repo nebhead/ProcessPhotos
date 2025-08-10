@@ -93,7 +93,7 @@
 	<script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
 	{% block scripts %} {% endblock %}
 
-	<!-- Version Pill in Lower Left Corner -->
+	<!-- Version Pill and Process Indicator in Lower Left Corner -->
     <style>
         .version-pill {
             position: fixed;
@@ -116,12 +116,69 @@
             transition: opacity 0.3s ease;
             white-space: nowrap;
         }
+
+        .process-indicator {
+            margin-left: 10px;
+            display: none;
+        }
     </style>
 	<div class="version-pill">
 		<span class="badge rounded-pill bg-secondary">v{{ settings['versions']['server_base'] }}</span>
+		<span id="process-indicator" class="badge rounded-pill bg-danger process-indicator" title="Scripts are still running in the background">
+			<i class="fas fa-cog fa-spin"></i>
+		</span>
 		<div class="version-hover">
 			<span class="badge bg-secondary">(Build {{ settings['versions']['server_build'] }})</span>
 		</div>
 	</div>
+
+	<script>
+		function checkRunningProcesses() {
+			fetch('/check_running_processes')
+				.then(response => response.json())
+				.then(data => {
+					const indicator = document.getElementById('process-indicator');
+					if (data.has_running_processes) {
+						indicator.style.display = 'inline-block';
+					} else {
+						indicator.style.display = 'none';
+					}
+				})
+				.catch(error => console.error('Error checking processes:', error));
+		}
+
+		// Intercept all form submissions that trigger script runs
+		document.addEventListener('submit', function(e) {
+			const form = e.target;
+			if (form.getAttribute('action')?.includes('/stream')) {
+				e.preventDefault();
+				
+				fetch(form.action, {
+					method: form.method,
+					body: new FormData(form)
+				})
+				.then(response => {
+					if (!response.ok) {
+						return response.json().then(data => {
+							throw new Error(data.message || 'An error occurred');
+						});
+					}
+					// Handle successful response - start the EventSource
+					const eventSource = new EventSource(form.action);
+					// Add your existing EventSource handling here
+					return null;
+				})
+				.catch(error => {
+					alert(error.message);
+				});
+			}
+		});
+
+		// Check every 5 seconds
+		setInterval(checkRunningProcesses, 5000);
+
+		// Check immediately on page load
+		checkRunningProcesses();
+	</script>
 </body>
 </html>
