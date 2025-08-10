@@ -407,17 +407,37 @@ def read_folder_status(path='config/folders.json', originals_path='originals', r
 	"""
 	Read the folder status from a JSON file
 
-	:param path: Path to the folder
-	:return: JSON object
+	:param path: Path to the folder status file
+	:param originals_path: Path to scan for originals
+	:param reset: Whether to force a rescan of the directory
+	:return: JSON object with folder status
 	"""
 	folder_status = {}
+	existing_status = {}
+	
+	try:
+		# Try to read existing status file if it exists
+		if os.path.exists(path):
+			with open(path, 'r') as f:
+				existing_status = json.load(f)
+	except Exception as e:
+		event = f"Warning: Could not read existing folder status: {e}"
+		write_log(event)
+		
 	try:
 		if reset:
+			# Scan directory for new structure
 			folder_status = {originals_path : scan_directory(path=originals_path)}
+			# If we have existing status, overlay the processed flags
+			if existing_status:
+				folder_status = update_folder_status(folder_status, existing_status)
 			write_folder_status(folder_status, path)
 		else:
-			with open(path, 'r') as f:
-				folder_status = json.load(f)
+			if existing_status:
+				folder_status = existing_status
+			else:
+				folder_status = {originals_path : scan_directory(path=originals_path)}
+				write_folder_status(folder_status, path)
 	except FileNotFoundError:
 		event = f"Warning: Folder status file not found at {path}. Scanning directory instead."
 		write_log(event)
@@ -428,28 +448,40 @@ def read_folder_status(path='config/folders.json', originals_path='originals', r
 
 def write_folder_status(folder_status, path='config/folders.json'):
 	"""
-	Write the folder status to a JSON file
+	Write the folder status to a JSON file, creating a timestamped backup if needed
 
-	:param path: Path to the folder
-	:param folder_status: JSON object
+	:param folder_status: JSON object containing folder status
+	:param path: Path to the folder status file
+	:return: folder_status object that was written
 	"""
 	try:
+		# Create backup if file exists and has content
+		if os.path.exists(path):
+			try:
+				with open(path, 'r') as f:
+					existing = json.load(f)
+					if existing:  # Only backup if there's actual content
+						timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+						backup_path = f"{path}.{timestamp}.bak"
+						with open(backup_path, 'w') as f:
+							json.dump(existing, f, indent=2)
+						event = f"Created backup of folder status at {backup_path}"
+						write_log(event)
+			except Exception as e:
+				event = f"Warning: Could not create backup: {e}"
+				write_log(event)
+		
+		# Write new status file
 		with open(path, 'w') as f:
 			json.dump(folder_status, f, indent=2)
-	except FileNotFoundError:
-		event = f"Error: Folder status file not found at {path}"
+		event = f"Folder status file written to {path}"
 		write_log(event)
-		raise
+		
 	except Exception as e:
 		event = f"Error writing folder status file: {e}"
 		write_log(event)
 		raise
-	finally:	
-		event = f"Folder status file written to {path}"
-		write_log(event)
-	# Write the folder status to a JSON file
-	#write_generic_json(folder_status, path)
-	# Return the folder status
+
 	return folder_status
 
 def update_folder_status(new, current):
