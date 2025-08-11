@@ -39,17 +39,25 @@ def create_logger(name, filename='logs/app.log', messageformat='%(asctime)s | %(
 		this function.  
 	'''
 	if not logger.hasHandlers():
+		# Create logs directory if it doesn't exist
+		os.makedirs(os.path.dirname(filename), exist_ok=True)
+		
 		# datefmt='%Y-%m-%d %H:%M:%S'
 		formatter = logging.Formatter(fmt=messageformat, datefmt='%Y-%m-%d %H:%M:%S')
 
 		# File Handler - Rotating log file
-		file_handler = RotatingFileHandler(
-			'logs/app.log',
-			maxBytes=10485760,  # 10MB
-			backupCount=10
-		)
-		file_handler.setFormatter(formatter)
-		file_handler.setLevel(level)
+		try:
+			file_handler = RotatingFileHandler(
+				filename,
+				maxBytes=10485760,  # 10MB
+				backupCount=10,
+				delay=True  # Don't open the file until we need to write
+			)
+			file_handler.setFormatter(formatter)
+			file_handler.setLevel(level)
+		except Exception as e:
+			print(f"Error setting up file handler: {e}")
+			file_handler = None
 		
 		# Stream Handler - Console output for Docker Support
 		stream_handler = logging.StreamHandler(sys.stdout)
@@ -58,9 +66,13 @@ def create_logger(name, filename='logs/app.log', messageformat='%(asctime)s | %(
 		
 		# Remove default handlers and add our custom ones
 		logger.handlers = []
-		logger.addHandler(file_handler)
+		if file_handler:
+			logger.addHandler(file_handler)
 		logger.addHandler(stream_handler)
 		logger.setLevel(level)
+		
+		# Log startup message
+		logger.info("Logger initialized successfully")
 
 	return logger
 

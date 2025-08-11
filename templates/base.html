@@ -117,31 +117,78 @@
             white-space: nowrap;
         }
 
+        .process-status {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .process-status:hover .status-text {
+            width: auto;
+            padding: 0 10px;
+            opacity: 1;
+        }
+
+        .status-text {
+            width: 0;
+            overflow: hidden;
+            white-space: nowrap;
+            opacity: 0;
+            transition: all 0.3s ease;
+            margin-right: 8px;
+        }
+
         .process-indicator {
-            margin-left: 10px;
-            display: none;
+            padding: 8px;
+            border-radius: 50%;
+            width: 35px;
+            height: 35px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
     </style>
 	<div class="version-pill">
 		<span class="badge rounded-pill bg-secondary">v{{ settings['versions']['server_base'] }}</span>
-		<span id="process-indicator" class="badge rounded-pill bg-danger process-indicator" title="Scripts are still running in the background">
-			<i class="fas fa-cog fa-spin"></i>
-		</span>
 		<div class="version-hover">
 			<span class="badge bg-secondary">(Build {{ settings['versions']['server_build'] }})</span>
 		</div>
 	</div>
 
+	<div class="process-status">
+		<span class="status-text" id="status-message">No scripts running</span>
+		<span id="process-indicator" class="badge bg-success process-indicator">
+			<i class="fas fa-check"></i>
+		</span>
+	</div>
+
 	<script>
 		function checkRunningProcesses() {
-			fetch('/check_running_processes')
+			fetch('/check_running_processes', {
+				// Prevent caching of the request
+				cache: 'no-store',
+				headers: {
+					'Cache-Control': 'no-cache'
+				}
+			})
 				.then(response => response.json())
 				.then(data => {
 					const indicator = document.getElementById('process-indicator');
+					const statusMessage = document.getElementById('status-message');
 					if (data.has_running_processes) {
-						indicator.style.display = 'inline-block';
+						indicator.classList.remove('bg-success');
+						indicator.classList.add('bg-danger');
+						indicator.innerHTML = '<i class="fas fa-cog fa-spin"></i>';
+						statusMessage.textContent = 'Scripts are running in the background';
 					} else {
-						indicator.style.display = 'none';
+						indicator.classList.remove('bg-danger');
+						indicator.classList.add('bg-success');
+						indicator.innerHTML = '<i class="fas fa-check"></i>';
+						statusMessage.textContent = 'No scripts running';
 					}
 				})
 				.catch(error => console.error('Error checking processes:', error));
@@ -153,23 +200,38 @@
 			if (form.getAttribute('action')?.includes('/stream')) {
 				e.preventDefault();
 				
+				const indicator = document.getElementById('process-indicator');
+				const statusMessage = document.getElementById('status-message');
+				
+				// Set to running state immediately
+				indicator.classList.remove('bg-success');
+				indicator.classList.add('bg-danger');
+				indicator.innerHTML = '<i class="fas fa-cog fa-spin"></i>';
+				statusMessage.textContent = 'Scripts are running in the background';
+				
+				// Submit the form
 				fetch(form.action, {
 					method: form.method,
 					body: new FormData(form)
 				})
 				.then(response => {
 					if (!response.ok) {
-						return response.json().then(data => {
-							throw new Error(data.message || 'An error occurred');
-						});
+						throw new Error('Failed to start process');
 					}
-					// Handle successful response - start the EventSource
-					const eventSource = new EventSource(form.action);
-					// Add your existing EventSource handling here
-					return null;
+					// Start checking more frequently
+					const checkInterval = setInterval(checkRunningProcesses, 1000);
+					// Stop frequent checking after 5 minutes
+					setTimeout(() => clearInterval(checkInterval), 300000);
 				})
 				.catch(error => {
-					alert(error.message);
+					console.error('Error:', error);
+					alert('Error starting process: ' + error.message);
+					
+					// Reset indicator if there's an error
+					indicator.classList.remove('bg-danger');
+					indicator.classList.add('bg-success');
+					indicator.innerHTML = '<i class="fas fa-check"></i>';
+					statusMessage.textContent = 'No scripts running';
 				});
 			}
 		});

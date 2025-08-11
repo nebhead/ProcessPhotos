@@ -24,6 +24,7 @@ from common import *
 from exif.exif import *
 from typing import Dict
 from datetime import datetime, timezone
+import time
 
 class ProcessRunningError(Exception):
     """Raised when attempting to start a script while another is running"""
@@ -48,18 +49,58 @@ class ProcessTracker:
         
     def add_process(self, process):
         with self._lock:
+            # First clean up any stale processes
+            self._cleanup_finished_processes()
             self._processes.add(process)
+            logger.info(f"Added new process {process.pid} - Total processes: {len(self._processes)}")
             
     def remove_process(self, process):
         with self._lock:
             if process in self._processes:
                 self._processes.remove(process)
+                logger.info(f"Removed process {process.pid} - Total processes: {len(self._processes)}")
+
+    def _cleanup_finished_processes(self):
+        """Helper method to clean up finished processes"""
+        finished = set()
+        for p in self._processes:
+            try:
+                if p.poll() is not None:  # Process has finished
+                    finished.add(p)
+                    logger.info(f"Found finished process {p.pid}")
+            except Exception as e:
+                logger.error(f"Error checking process {p.pid}: {e}")
+                finished.add(p)  # Remove problematic processes
+        
+        # Remove finished processes
+        self._processes -= finished
                 
     def has_running_processes(self):
         with self._lock:
-            # Clean up finished processes first
-            self._processes = {p for p in self._processes if p.poll() is None}
-            return len(self._processes) > 0
+            # Clean up any finished processes first
+            self._cleanup_finished_processes()
+            
+            # Now check remaining processes more thoroughly
+            running = False
+            active_pids = []
+            for p in self._processes:
+                try:
+                    poll_result = p.poll()
+                    if poll_result is None:  # Still running
+                        running = True
+                        active_pids.append(p.pid)
+                except Exception as e:
+                    logger.error(f"Error checking process {p.pid}: {e}")
+                    continue
+            
+            # Only log if there are actual processes or if running state changed
+            if len(self._processes) > 0:
+                logger.info(f"Process status check:")
+                logger.info(f"- Running processes: {running}")
+                logger.info(f"- Total tracked processes: {len(self._processes)}")
+                logger.info(f"- Active PIDs: {active_pids}")
+            
+            return running
 
 process_tracker = ProcessTracker()
 
@@ -446,55 +487,99 @@ def run_script(action, path='originals'):
 	# Check if there are any running processes before starting a new one
 	if process_tracker.has_running_processes():
 		raise ProcessRunningError("Another script is currently running. Please wait for it to complete.")
-
+	
+	logger.info("====== Starting new script execution ======")
 	if action == 'preprocess':
 		command = settings['scripts']['pre_proc']['type']
 		script_path = os.path.join(settings['scripts']['pre_proc']['path'], settings['scripts']['pre_proc']['script'])
 		arguments = path
+		logger.info(f"Command: {command} {script_path} {arguments}")
 	else:
 		command = settings['scripts']['post_proc']['type']
 		script_path = os.path.join(settings['scripts']['post_proc']['path'], settings['scripts']['post_proc']['script']) 
 		arguments = ''
+		logger.info(f"Command: {command} {script_path}")
 
-	# Replace 'your_script.sh' with your actual script path
-	process = subprocess.Popen(
-		[command, script_path, arguments],
-		stdout=subprocess.PIPE,
-		stderr=subprocess.STDOUT,
-		universal_newlines=True,
-		start_new_session=True  # This ensures the process runs in its own session
-	)
-	
-	# Track this process
-	process_tracker.add_process(process)
+	try:
+		# Replace 'your_script.sh' with your actual script path
+		process = subprocess.Popen(
+			[command, script_path, arguments],
+			stdout=subprocess.PIPE,
+			stderr=subprocess.STDOUT,
+			universal_newlines=True,
+			start_new_session=True  # This ensures the process runs in its own session
+		)
+		
+		# Track this process
+		process_tracker.add_process(process)
+		logger.info(f"Started process with PID: {process.pid}")
+	except Exception as e:
+		logger.error(f"Error starting script: {e}")
+		raise
+
+	def monitor_process():
+		"""Monitor the process in a separate thread"""
+		logger.info(f"Monitor thread started for process {process.pid}")
+		try:
+			# Wait for process to complete
+			process.wait()
+			return_code = process.returncode
+			logger.info(f"Process {process.pid} completed with return code {return_code}")
+		except Exception as e:
+			logger.error(f"Error in monitor_process: {e}")
+			return_code = -1
+		finally:
+			# Ensure process is removed from tracking
+			process_tracker.remove_process(process)
+			logger.info(f"====== Script execution completed for PID {process.pid} ======")
 
 	def stream_output():
+		"""Stream process output via SSE"""
 		try:
+			# Verify process is being tracked
+			if not process_tracker.has_running_processes():
+				logger.error(f"Process {process.pid} not properly tracked!")
+				process_tracker.add_process(process)
+			
+			# Start monitoring thread
+			monitor_thread = threading.Thread(target=monitor_process)
+			monitor_thread.daemon = True
+			monitor_thread.start()
+			
+			# Small delay to ensure monitoring is established
+			time.sleep(0.2)
+
 			while True:
 				output = process.stdout.readline()
-				if output == '' and process.poll() is not None:
-					break
 				if output:
 					try:
+						# Send each line as a separate SSE event with newlines preserved
 						yield f"data: {json.dumps(output)}\n\n"
+						# Flush the output to ensure immediate display
+						yield f": keepalive\n\n"
 					except Exception as e:
 						logger.error(f"Error yielding output: {e}")
 						continue
+                
+				# Check if process has finished
+				if process.poll() is not None:
+					# Send final output
+					rc = process.poll()
+					try:
+						yield f"data: {json.dumps(f'Script finished with return code {rc}')}\n\n"
+					except Exception as e:
+						logger.error(f"Error yielding final status: {e}")
+					# Only remove process after we've sent all output
+					process_tracker.remove_process(process)
+					break
 
-			rc = process.poll()
-			try:
-				yield f"data: {json.dumps(f'Script finished with return code {rc}')}\n\n"
-			except Exception as e:
-				logger.error(f"Error yielding final status: {e}")
-			finally:
-				# Remove from tracker when done
-				process_tracker.remove_process(process)
 		except Exception as e:
 			logger.error(f"Error in stream_output: {e}")
-			# Even if streaming fails, let the process continue running
-			process.wait()
-			# Make sure process is removed from tracker
-			process_tracker.remove_process(process)
+			process_tracker.remove_process(process)  # Clean up on error
+			try:
+				yield f"data: {json.dumps('Error occurred while streaming output')}\n\n"
+			except:
+				pass
 
 	return stream_output()
 
@@ -530,8 +615,40 @@ def stream(action=None):
 
 @app.route('/check_running_processes')
 def check_running_processes():
-	global process_tracker
-	return jsonify({'has_running_processes': process_tracker.has_running_processes()})
+    global process_tracker
+    has_running = process_tracker.has_running_processes()
+    response_data = {
+        'has_running_processes': has_running,
+        'timestamp': datetime.now().isoformat(),
+        'process_count': len(process_tracker._processes)
+    }
+    # More detailed logging to help debug process tracking
+    logger.info(f"Process status check at {response_data['timestamp']}")
+    logger.info(f"Total tracked processes: {response_data['process_count']}")
+    logger.info(f"Has running processes: {has_running}")
+    logger.info("---") # Separator for readability
+    return jsonify(response_data)
+
+@app.route('/test_process_tracker')
+def test_process_tracker():
+    """Test endpoint to verify process tracking"""
+    global process_tracker
+    
+    # Start a long-running process (sleep for 30 seconds)
+    process = subprocess.Popen(
+        ['sleep', '30'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        universal_newlines=True
+    )
+    
+    process_tracker.add_process(process)
+    logger.info(f"Started test process with PID: {process.pid}")
+    
+    return jsonify({
+        'message': 'Test process started',
+        'pid': process.pid
+    })
 
 @app.route('/toggle_processed', methods=['POST'])
 def toggle_processed():
