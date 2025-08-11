@@ -44,63 +44,110 @@ EXPORT_FOLDER = settings['folders']['export']
 # Track background processes
 class ProcessTracker:
 	def __init__(self):
-		self._processes = set()
+		self._processes = {}  # Dictionary of process_id -> process object
 		self._lock = threading.Lock()
+		self._active_scripts = {}  # Dictionary to track scripts by type: "preprocess" or "postprocess"
 		
-	def add_process(self, process):
+	def add_process(self, process, script_type=None):
 		with self._lock:
-			# First clean up any stale processes
-			self._cleanup_finished_processes()
-			self._processes.add(process)
-			logger.info(f"Added new process {process.pid} - Total processes: {len(self._processes)}")
+			process_id = str(uuid.uuid4())
+			self._processes[process_id] = {
+				"process": process,
+				"pid": process.pid if hasattr(process, "pid") else None,
+				"start_time": datetime.now(),
+				"type": script_type
+			}
 			
-	def remove_process(self, process):
+			# If this is a pre or post processing script, track it specifically
+			if script_type in ["preprocess", "postprocess"]:
+				self._active_scripts[script_type] = process_id
+				
+			logger.info(f"Added new process {process.pid} with ID {process_id} - Total processes: {len(self._processes)}")
+			return process_id
+			
+	def remove_process(self, process_id):
 		with self._lock:
-			if process in self._processes:
-				self._processes.remove(process)
-				logger.info(f"Removed process {process.pid} - Total processes: {len(self._processes)}")
+			if process_id in self._processes:
+				process_info = self._processes[process_id]
+				# Remove from active scripts if it was one
+				for script_type, active_id in list(self._active_scripts.items()):
+					if active_id == process_id:
+						del self._active_scripts[script_type]
+						
+				pid = process_info["pid"] if process_info["pid"] else "unknown"
+				del self._processes[process_id]
+				logger.info(f"Removed process {pid} with ID {process_id} - Total processes: {len(self._processes)}")
+				return True
+			return False
+
+	def get_process_id_by_pid(self, pid):
+		"""Get internal process ID from OS process ID"""
+		with self._lock:
+			for process_id, process_info in self._processes.items():
+				if process_info["pid"] == pid:
+					return process_id
+			return None
 
 	def _cleanup_finished_processes(self):
 		"""Helper method to clean up finished processes"""
-		finished = set()
-		for p in self._processes:
+		finished_ids = []
+		for process_id, process_info in self._processes.items():
+			process = process_info["process"]
 			try:
-				if p.poll() is not None:  # Process has finished
-					finished.add(p)
-					logger.info(f"Found finished process {p.pid}")
+				if hasattr(process, "poll") and process.poll() is not None:  # Process has finished
+					finished_ids.append(process_id)
+					logger.info(f"Found finished process {process_info['pid']} with ID {process_id}")
 			except Exception as e:
-				logger.error(f"Error checking process {p.pid}: {e}")
-				finished.add(p)  # Remove problematic processes
+				logger.error(f"Error checking process {process_info['pid']} with ID {process_id}: {e}")
+				finished_ids.append(process_id)  # Remove problematic processes
 		
 		# Remove finished processes
-		self._processes -= finished
+		for process_id in finished_ids:
+			self.remove_process(process_id)
 				
-	def has_running_processes(self):
+	def has_running_processes(self, script_type=None):
 		with self._lock:
 			# Clean up any finished processes first
 			self._cleanup_finished_processes()
 			
-			# Now check remaining processes more thoroughly
-			running = False
-			active_pids = []
-			for p in self._processes:
-				try:
-					poll_result = p.poll()
-					if poll_result is None:  # Still running
-						running = True
-						active_pids.append(p.pid)
-				except Exception as e:
-					logger.error(f"Error checking process {p.pid}: {e}")
-					continue
+			# If script_type specified, only check that type
+			if script_type:
+				return script_type in self._active_scripts
+				
+			# Check if any processes are running
+			return len(self._processes) > 0
 			
-			# Only log if there are actual processes or if running state changed
+	def get_status(self):
+		with self._lock:
+			# Clean up any finished processes first
+			self._cleanup_finished_processes()
+			
+			# Get counts for different script types
+			status = {
+				"running_processes": len(self._processes),
+				"preprocess_running": "preprocess" in self._active_scripts,
+				"postprocess_running": "postprocess" in self._active_scripts,
+				"active_pids": [],
+				"timestamp": datetime.now().isoformat()
+			}
+			
+			# Add active PIDs for detailed info
+			for process_id, process_info in self._processes.items():
+				if process_info["pid"]:
+					status["active_pids"].append({
+						"pid": process_info["pid"],
+						"type": process_info["type"],
+						"running_time": (datetime.now() - process_info["start_time"]).total_seconds()
+					})
+			
+			# Log status if there are processes
 			if len(self._processes) > 0:
 				logger.info(f"Process status check:")
-				logger.info(f"- Running processes: {running}")
-				logger.info(f"- Total tracked processes: {len(self._processes)}")
-				logger.info(f"- Active PIDs: {active_pids}")
+				logger.info(f"- Running processes: {len(self._processes)}")
+				logger.info(f"- Active scripts: {list(self._active_scripts.keys())}")
+				logger.info(f"- Active PIDs: {[p['pid'] for p in status['active_pids']]}")
 			
-			return running
+			return status
 
 process_tracker = ProcessTracker()
 
@@ -485,10 +532,10 @@ def run_script(action, path='originals'):
 	global process_tracker
 
 	# Check if there are any running processes before starting a new one
-	if process_tracker.has_running_processes():
-		raise ProcessRunningError("Another script is currently running. Please wait for it to complete.")
+	if process_tracker.has_running_processes(script_type=action):
+		raise ProcessRunningError(f"A {action} script is already running. Please wait for it to complete.")
 	
-	logger.info("====== Starting new script execution ======")
+	logger.info(f"====== Starting new {action} script execution ======")
 	if action == 'preprocess':
 		command = settings['scripts']['pre_proc']['type']
 		script_path = os.path.join(settings['scripts']['pre_proc']['path'], settings['scripts']['pre_proc']['script'])
@@ -511,8 +558,8 @@ def run_script(action, path='originals'):
 			start_new_session=True  # This ensures the process runs in its own session
 		)
 		# Track this process
-		process_tracker.add_process(process)
-		logger.info(f"Started process with PID: {process.pid}")
+		process_id = process_tracker.add_process(process, script_type=action)
+		logger.info(f"Started {action} process with PID: {process.pid}, ID: {process_id}")
 	except Exception as e:
 		logger.error(f"Error starting script: {e}")
 		raise
@@ -530,17 +577,14 @@ def run_script(action, path='originals'):
 			return_code = -1
 		finally:
 			# Ensure process is removed from tracking
-			process_tracker.remove_process(process)
+			process_id = process_tracker.get_process_id_by_pid(process.pid)
+			if process_id:
+				process_tracker.remove_process(process_id)
 			logger.info(f"====== Script execution completed for PID {process.pid} ======")
 
 	def stream_output():
 		"""Stream process output via SSE"""
 		try:
-			# Verify process is being tracked
-			if not process_tracker.has_running_processes():
-				logger.error(f"Process {process.pid} not properly tracked!")
-				process_tracker.add_process(process)
-			
 			# Start monitoring thread
 			monitor_thread = threading.Thread(target=monitor_process)
 			monitor_thread.daemon = True
@@ -569,13 +613,18 @@ def run_script(action, path='originals'):
 						yield f"data: {json.dumps(f'Script finished with return code {rc}')}\n\n"
 					except Exception as e:
 						logger.error(f"Error yielding final status: {e}")
+					
 					# Only remove process after we've sent all output
-					process_tracker.remove_process(process)
+					process_id = process_tracker.get_process_id_by_pid(process.pid)
+					if process_id:
+						process_tracker.remove_process(process_id)
 					break
 
 		except Exception as e:
 			logger.error(f"Error in stream_output: {e}")
-			process_tracker.remove_process(process)  # Clean up on error
+			process_id = process_tracker.get_process_id_by_pid(process.pid)
+			if process_id:
+				process_tracker.remove_process(process_id)  # Clean up on error
 			try:
 				yield f"data: {json.dumps('Error occurred while streaming output')}\n\n"
 			except:
@@ -588,25 +637,23 @@ def run_script(action, path='originals'):
 def stream(action=None):
 	global process_tracker
 	
-	if process_tracker.has_running_processes():
+	# Determine which action to use
+	script_action = action if action else "postprocess"
+	
+	# Check if the specific script type is already running
+	if process_tracker.has_running_processes(script_type=script_action):
 		return jsonify({
 			'error': True,
-			'message': 'Another script is currently running. Please wait for it to complete.'
+			'message': f'A {script_action} script is currently running. Please wait for it to complete.'
 		}), 409  # HTTP 409 Conflict
 	
 	path = request.args.get('script_arg', 'originals')
 	
 	try:
-		if action == 'preprocess':
-			return Response(
-				run_script('preprocess', path=path),
-				mimetype='text/event-stream'
-			)
-		else: 
-			return Response(
-				run_script('postprocess'),
-				mimetype='text/event-stream'
-			)
+		return Response(
+			run_script(script_action, path=path),
+			mimetype='text/event-stream'
+		)
 	except ProcessRunningError as e:
 		return jsonify({
 			'error': True,
@@ -616,23 +663,38 @@ def stream(action=None):
 @app.route('/check_running_processes')
 def check_running_processes():
 	global process_tracker
-	has_running = process_tracker.has_running_processes()
+	
+	# Get detailed status from the process tracker
+	status = process_tracker.get_status()
+	
+	# Create response data
 	response_data = {
-		'has_running_processes': has_running,
-		'timestamp': datetime.now().isoformat(),
-		'process_count': len(process_tracker._processes)
+		'has_running_processes': status["running_processes"] > 0,
+		'preprocess_running': status["preprocess_running"],
+		'postprocess_running': status["postprocess_running"],
+		'timestamp': status["timestamp"],
+		'process_count': status["running_processes"],
+		'active_pids': [p["pid"] for p in status["active_pids"]]
 	}
-	# More detailed logging to help debug process tracking
-	logger.info(f"Process status check at {response_data['timestamp']}")
-	logger.info(f"Total tracked processes: {response_data['process_count']}")
-	logger.info(f"Has running processes: {has_running}")
-	logger.info("---") # Separator for readability
+	
+	# Detailed logging only when processes are running
+	if status["running_processes"] > 0:
+		logger.info(f"Process status check at {response_data['timestamp']}")
+		logger.info(f"Total tracked processes: {response_data['process_count']}")
+		logger.info(f"Running processes: {response_data['has_running_processes']}")
+		logger.info(f"Pre-process running: {response_data['preprocess_running']}")
+		logger.info(f"Post-process running: {response_data['postprocess_running']}")
+		logger.info("---") # Separator for readability
+	
 	return jsonify(response_data)
 
 @app.route('/test_process_tracker')
 def test_process_tracker():
 	"""Test endpoint to verify process tracking"""
 	global process_tracker
+	
+	# Specify a script type for testing
+	script_type = request.args.get('type', 'test')
 	
 	# Start a long-running process (sleep for 30 seconds)
 	process = subprocess.Popen(
@@ -642,12 +704,13 @@ def test_process_tracker():
 		universal_newlines=True
 	)
 	
-	process_tracker.add_process(process)
-	logger.info(f"Started test process with PID: {process.pid}")
+	process_id = process_tracker.add_process(process, script_type=script_type)
+	logger.info(f"Started test process with PID: {process.pid}, ID: {process_id}")
 	
 	return jsonify({
-		'message': 'Test process started',
-		'pid': process.pid
+		'message': f'Test {script_type} process started',
+		'pid': process.pid,
+		'process_id': process_id
 	})
 
 @app.route('/toggle_processed', methods=['POST'])

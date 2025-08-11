@@ -180,16 +180,69 @@
 				.then(data => {
 					const indicator = document.getElementById('process-indicator');
 					const statusMessage = document.getElementById('status-message');
+					
+					// Update pre-process and post-process indicators if they exist on the page
+					const preProcWorking = document.getElementById('preProcWorking');
+					const preProcDone = document.getElementById('preProcDone');
+					const postProcWorking = document.getElementById('postProcWorking');
+					const postProcDone = document.getElementById('postProcDone');
+					const gotoImport = document.getElementById('gotoImport');
+					
+					// Update main process indicator
 					if (data.has_running_processes) {
 						indicator.classList.remove('bg-success');
 						indicator.classList.add('bg-danger');
 						indicator.innerHTML = '<i class="fas fa-cog fa-spin"></i>';
-						statusMessage.textContent = 'Scripts are running in the background';
+						
+						if (data.preprocess_running && data.postprocess_running) {
+							statusMessage.textContent = 'Pre-processing and Post-processing scripts are running';
+						} else if (data.preprocess_running) {
+							statusMessage.textContent = 'Pre-processing script is running';
+						} else if (data.postprocess_running) {
+							statusMessage.textContent = 'Post-processing script is running';
+						} else {
+							statusMessage.textContent = 'Scripts are running in the background';
+						}
 					} else {
 						indicator.classList.remove('bg-danger');
 						indicator.classList.add('bg-success');
 						indicator.innerHTML = '<i class="fas fa-check"></i>';
 						statusMessage.textContent = 'No scripts running';
+						
+						// If no scripts are running, make sure UI reflects that
+						if (preProcWorking && preProcDone) {
+							preProcWorking.style.display = 'none';
+							preProcDone.style.display = '';
+							if (gotoImport) gotoImport.style.display = '';
+						}
+						
+						if (postProcWorking && postProcDone) {
+							postProcWorking.style.display = 'none';
+							postProcDone.style.display = '';
+						}
+					}
+					
+					// Update specific process indicators if they're on the page
+					if (preProcWorking && preProcDone) {
+						if (data.preprocess_running) {
+							preProcWorking.style.display = '';
+							preProcDone.style.display = 'none';
+							if (gotoImport) gotoImport.style.display = 'none';
+						} else {
+							preProcWorking.style.display = 'none';
+							preProcDone.style.display = '';
+							if (gotoImport) gotoImport.style.display = '';
+						}
+					}
+					
+					if (postProcWorking && postProcDone) {
+						if (data.postprocess_running) {
+							postProcWorking.style.display = '';
+							postProcDone.style.display = 'none';
+						} else {
+							postProcWorking.style.display = 'none';
+							postProcDone.style.display = '';
+						}
 					}
 				})
 				.catch(error => console.error('Error checking processes:', error));

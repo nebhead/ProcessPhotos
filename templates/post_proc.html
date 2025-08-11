@@ -47,26 +47,67 @@
 
 <script>
     const outputPostProc = document.getElementById('outputPostProc');
-
-    outputPostProc.textContent += '\n+++ Calling API +++\n';
-
-    const paramsPostProc = new URLSearchParams({
-        script_arg: 'postprocess'
+    let eventSourcePostProc = null;
+    
+    // Start checking process status immediately and then periodically
+    checkRunningProcesses();
+    
+    function startPostProcessScript() {
+        outputPostProc.textContent += '\n+++ Calling API +++\n';
+        
+        const paramsPostProc = new URLSearchParams({
+            script_arg: 'postprocess'
+        });
+        
+        eventSourcePostProc = new EventSource(`/stream?${paramsPostProc.toString()}`);
+        
+        eventSourcePostProc.onmessage = function(e) {
+            // Parse the JSON-encoded data and append it
+            const text = JSON.parse(e.data);
+            outputPostProc.textContent += text;
+            outputPostProc.scrollTop = outputPostProc.scrollHeight;
+            
+            // Check process status to update UI
+            checkRunningProcesses();
+        };
+        
+        eventSourcePostProc.onerror = function(e) {
+            outputPostProc.textContent += '\nConnection closed\n';
+            eventSourcePostProc.close();
+            
+            // Update the UI
+            checkRunningProcesses();
+            
+            // Final check after a delay to ensure all updates are processed
+            setTimeout(checkRunningProcesses, 1000);
+        };
+    }
+    
+    // Check if postprocess is already running
+    fetch('/check_running_processes')
+        .then(response => response.json())
+        .then(data => {
+            if (data.postprocess_running) {
+                outputPostProc.textContent = "Post-process script is already running. Connecting to output stream...\n";
+                $('#postProcWorking').show();
+                $('#postProcDone').hide();
+            } else {
+                startPostProcessScript();
+            }
+        })
+        .catch(error => {
+            console.error('Error checking process status:', error);
+            startPostProcessScript();
+        });
+    
+    // Poll for status updates every 3 seconds
+    const statusInterval = setInterval(checkRunningProcesses, 3000);
+    
+    // Clean up when leaving the page
+    window.addEventListener('beforeunload', function() {
+        clearInterval(statusInterval);
+        if (eventSourcePostProc) {
+            eventSourcePostProc.close();
+        }
     });
-    const eventSourcePostProc = new EventSource(`/stream?${paramsPostProc.toString()}`);
-    
-    eventSourcePostProc.onmessage = function(e) {
-        // Parse the JSON-encoded data and append it
-        const text = JSON.parse(e.data);
-        outputPostProc.textContent += text;
-        outputPostProc.scrollTop = outputPostProc.scrollHeight;
-    };
-    
-    eventSourcePostProc.onerror = function(e) {
-        outputPostProc.textContent += '\nConnection closed\n';
-        eventSourcePostProc.close();
-        // Do something?
-        $('#postProcWorking').hide();
-        $('#postProcDone').show();
-    };
 </script>

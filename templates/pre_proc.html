@@ -56,25 +56,66 @@
 
 <script>
     const output = document.getElementById('output');
-
-    const params = new URLSearchParams({
-        script_arg: '{{ folder_path}}'
+    let eventSourcePreProc = null;
+    
+    // Start checking process status immediately and then periodically
+    checkRunningProcesses();
+    
+    function startPreProcessScript() {
+        const params = new URLSearchParams({
+            script_arg: '{{ folder_path}}'
+        });
+        
+        eventSourcePreProc = new EventSource(`/stream/preprocess?${params.toString()}`);
+        
+        eventSourcePreProc.onmessage = function(e) {
+            // Parse the JSON-encoded data and append it
+            const text = JSON.parse(e.data);
+            output.textContent += text;
+            output.scrollTop = output.scrollHeight;
+            
+            // Check process status to update UI
+            checkRunningProcesses();
+        };
+        
+        eventSourcePreProc.onerror = function(e) {
+            output.textContent += '\nConnection closed\n';
+            eventSourcePreProc.close();
+            
+            // Update the UI
+            checkRunningProcesses();
+            
+            // Final check after a delay to ensure all updates are processed
+            setTimeout(checkRunningProcesses, 1000);
+        };
+    }
+    
+    // Check if preprocess is already running
+    fetch('/check_running_processes')
+        .then(response => response.json())
+        .then(data => {
+            if (data.preprocess_running) {
+                output.textContent = "Pre-process script is already running. Connecting to output stream...\n";
+                $('#preProcWorking').show();
+                $('#preProcDone').hide();
+                $('#gotoImport').hide();
+            } else {
+                startPreProcessScript();
+            }
+        })
+        .catch(error => {
+            console.error('Error checking process status:', error);
+            startPreProcessScript();
+        });
+    
+    // Poll for status updates every 3 seconds
+    const statusInterval = setInterval(checkRunningProcesses, 3000);
+    
+    // Clean up when leaving the page
+    window.addEventListener('beforeunload', function() {
+        clearInterval(statusInterval);
+        if (eventSourcePreProc) {
+            eventSourcePreProc.close();
+        }
     });
-    const eventSourcePreProc = new EventSource(`/stream/preprocess?${params.toString()}`);
-    
-    eventSourcePreProc.onmessage = function(e) {
-        // Parse the JSON-encoded data and append it
-        const text = JSON.parse(e.data);
-        output.textContent += text;
-        output.scrollTop = output.scrollHeight;
-    };
-    
-    eventSourcePreProc.onerror = function(e) {
-        output.textContent += '\nConnection closed\n';
-        eventSourcePreProc.close();
-        // Do something
-        $('#preProcWorking').hide();
-        $('#preProcDone').show();
-        $('#gotoImport').show();
-    };
 </script>
