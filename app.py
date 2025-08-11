@@ -2,7 +2,7 @@
 
 """
  *****************************************
- 	Flask Script
+	Flask Script
  *****************************************
 
  Description: WebUI for the project.  
@@ -27,8 +27,8 @@ from datetime import datetime, timezone
 import time
 
 class ProcessRunningError(Exception):
-    """Raised when attempting to start a script while another is running"""
-    pass
+	"""Raised when attempting to start a script while another is running"""
+	pass
 
 """
 Globals
@@ -43,64 +43,64 @@ EXPORT_FOLDER = settings['folders']['export']
 
 # Track background processes
 class ProcessTracker:
-    def __init__(self):
-        self._processes = set()
-        self._lock = threading.Lock()
-        
-    def add_process(self, process):
-        with self._lock:
-            # First clean up any stale processes
-            self._cleanup_finished_processes()
-            self._processes.add(process)
-            logger.info(f"Added new process {process.pid} - Total processes: {len(self._processes)}")
-            
-    def remove_process(self, process):
-        with self._lock:
-            if process in self._processes:
-                self._processes.remove(process)
-                logger.info(f"Removed process {process.pid} - Total processes: {len(self._processes)}")
+	def __init__(self):
+		self._processes = set()
+		self._lock = threading.Lock()
+		
+	def add_process(self, process):
+		with self._lock:
+			# First clean up any stale processes
+			self._cleanup_finished_processes()
+			self._processes.add(process)
+			logger.info(f"Added new process {process.pid} - Total processes: {len(self._processes)}")
+			
+	def remove_process(self, process):
+		with self._lock:
+			if process in self._processes:
+				self._processes.remove(process)
+				logger.info(f"Removed process {process.pid} - Total processes: {len(self._processes)}")
 
-    def _cleanup_finished_processes(self):
-        """Helper method to clean up finished processes"""
-        finished = set()
-        for p in self._processes:
-            try:
-                if p.poll() is not None:  # Process has finished
-                    finished.add(p)
-                    logger.info(f"Found finished process {p.pid}")
-            except Exception as e:
-                logger.error(f"Error checking process {p.pid}: {e}")
-                finished.add(p)  # Remove problematic processes
-        
-        # Remove finished processes
-        self._processes -= finished
-                
-    def has_running_processes(self):
-        with self._lock:
-            # Clean up any finished processes first
-            self._cleanup_finished_processes()
-            
-            # Now check remaining processes more thoroughly
-            running = False
-            active_pids = []
-            for p in self._processes:
-                try:
-                    poll_result = p.poll()
-                    if poll_result is None:  # Still running
-                        running = True
-                        active_pids.append(p.pid)
-                except Exception as e:
-                    logger.error(f"Error checking process {p.pid}: {e}")
-                    continue
-            
-            # Only log if there are actual processes or if running state changed
-            if len(self._processes) > 0:
-                logger.info(f"Process status check:")
-                logger.info(f"- Running processes: {running}")
-                logger.info(f"- Total tracked processes: {len(self._processes)}")
-                logger.info(f"- Active PIDs: {active_pids}")
-            
-            return running
+	def _cleanup_finished_processes(self):
+		"""Helper method to clean up finished processes"""
+		finished = set()
+		for p in self._processes:
+			try:
+				if p.poll() is not None:  # Process has finished
+					finished.add(p)
+					logger.info(f"Found finished process {p.pid}")
+			except Exception as e:
+				logger.error(f"Error checking process {p.pid}: {e}")
+				finished.add(p)  # Remove problematic processes
+		
+		# Remove finished processes
+		self._processes -= finished
+				
+	def has_running_processes(self):
+		with self._lock:
+			# Clean up any finished processes first
+			self._cleanup_finished_processes()
+			
+			# Now check remaining processes more thoroughly
+			running = False
+			active_pids = []
+			for p in self._processes:
+				try:
+					poll_result = p.poll()
+					if poll_result is None:  # Still running
+						running = True
+						active_pids.append(p.pid)
+				except Exception as e:
+					logger.error(f"Error checking process {p.pid}: {e}")
+					continue
+			
+			# Only log if there are actual processes or if running state changed
+			if len(self._processes) > 0:
+				logger.info(f"Process status check:")
+				logger.info(f"- Running processes: {running}")
+				logger.info(f"- Total tracked processes: {len(self._processes)}")
+				logger.info(f"- Active PIDs: {active_pids}")
+			
+			return running
 
 process_tracker = ProcessTracker()
 
@@ -246,9 +246,9 @@ def admin(action=None):
 
 @app.route('/manifest')
 def manifest():
-    res = make_response(render_template('manifest.json'), 200)
-    res.headers["Content-Type"] = "text/cache-manifest"
-    return res
+	res = make_response(render_template('manifest.json'), 200)
+	res.headers["Content-Type"] = "text/cache-manifest"
+	return res
 
 @app.route('/selectfolder', methods=['POST', 'GET'])
 def select_folder():
@@ -494,22 +494,22 @@ def run_script(action, path='originals'):
 		script_path = os.path.join(settings['scripts']['pre_proc']['path'], settings['scripts']['pre_proc']['script'])
 		arguments = path
 		logger.info(f"Command: {command} {script_path} {arguments}")
+		cmd_list = [command, script_path, arguments] if arguments else [command, script_path]
 	else:
 		command = settings['scripts']['post_proc']['type']
 		script_path = os.path.join(settings['scripts']['post_proc']['path'], settings['scripts']['post_proc']['script']) 
-		arguments = ''
 		logger.info(f"Command: {command} {script_path}")
+		cmd_list = [command, script_path]
 
 	try:
-		# Replace 'your_script.sh' with your actual script path
+		# Only include arguments if not empty
 		process = subprocess.Popen(
-			[command, script_path, arguments],
+			cmd_list,
 			stdout=subprocess.PIPE,
 			stderr=subprocess.STDOUT,
 			universal_newlines=True,
 			start_new_session=True  # This ensures the process runs in its own session
 		)
-		
 		# Track this process
 		process_tracker.add_process(process)
 		logger.info(f"Started process with PID: {process.pid}")
@@ -560,7 +560,7 @@ def run_script(action, path='originals'):
 					except Exception as e:
 						logger.error(f"Error yielding output: {e}")
 						continue
-                
+				
 				# Check if process has finished
 				if process.poll() is not None:
 					# Send final output
@@ -615,40 +615,40 @@ def stream(action=None):
 
 @app.route('/check_running_processes')
 def check_running_processes():
-    global process_tracker
-    has_running = process_tracker.has_running_processes()
-    response_data = {
-        'has_running_processes': has_running,
-        'timestamp': datetime.now().isoformat(),
-        'process_count': len(process_tracker._processes)
-    }
-    # More detailed logging to help debug process tracking
-    logger.info(f"Process status check at {response_data['timestamp']}")
-    logger.info(f"Total tracked processes: {response_data['process_count']}")
-    logger.info(f"Has running processes: {has_running}")
-    logger.info("---") # Separator for readability
-    return jsonify(response_data)
+	global process_tracker
+	has_running = process_tracker.has_running_processes()
+	response_data = {
+		'has_running_processes': has_running,
+		'timestamp': datetime.now().isoformat(),
+		'process_count': len(process_tracker._processes)
+	}
+	# More detailed logging to help debug process tracking
+	logger.info(f"Process status check at {response_data['timestamp']}")
+	logger.info(f"Total tracked processes: {response_data['process_count']}")
+	logger.info(f"Has running processes: {has_running}")
+	logger.info("---") # Separator for readability
+	return jsonify(response_data)
 
 @app.route('/test_process_tracker')
 def test_process_tracker():
-    """Test endpoint to verify process tracking"""
-    global process_tracker
-    
-    # Start a long-running process (sleep for 30 seconds)
-    process = subprocess.Popen(
-        ['sleep', '30'],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True
-    )
-    
-    process_tracker.add_process(process)
-    logger.info(f"Started test process with PID: {process.pid}")
-    
-    return jsonify({
-        'message': 'Test process started',
-        'pid': process.pid
-    })
+	"""Test endpoint to verify process tracking"""
+	global process_tracker
+	
+	# Start a long-running process (sleep for 30 seconds)
+	process = subprocess.Popen(
+		['sleep', '30'],
+		stdout=subprocess.PIPE,
+		stderr=subprocess.STDOUT,
+		universal_newlines=True
+	)
+	
+	process_tracker.add_process(process)
+	logger.info(f"Started test process with PID: {process.pid}")
+	
+	return jsonify({
+		'message': 'Test process started',
+		'pid': process.pid
+	})
 
 @app.route('/toggle_processed', methods=['POST'])
 def toggle_processed():
@@ -734,7 +734,7 @@ def get_folder_data(path='originals'):
 	 Walk the folder_status dictionary to map the path, then return the following structure:
 	 folder_details = [folder_dict of each subfolder in the path]
 	 folder_dict = {
-	 	'name' : folder,
+		'name' : folder,
 		'num_folders' : number of subfolders in this folder,
 		'num_files' : number of files in this folder,
 		'processed' : True/False/None (None indicates partially processed)
@@ -772,7 +772,7 @@ def get_folder_data(path='originals'):
 		subfolder_target = folder_status.copy()
 		
 		''' Traverse the folder_status dictionary to find the path, get details of the subfolders in the path, 
-		    and return a list of dictionaries with the details of each subfolder. '''
+			and return a list of dictionaries with the details of each subfolder. '''
 		# If path_depth is 1, then we are at the top level of the folder_status dictionary
 		if path_depth == 1:
 			subfolder_target = subfolder_target[path_list[0]]['subfolders']
@@ -1151,44 +1151,44 @@ def convert_date(date, pattern):
 	return '1900-01-01'
 
 def date_is_after(date_string1, date_string2):
-    """
-    Compare two date strings and return True if the first date is after the second date.
+	"""
+	Compare two date strings and return True if the first date is after the second date.
 
-    Args:
-    date_string1 (str): The first date string.
-    date_string2 (str): The second date string.
+	Args:
+	date_string1 (str): The first date string.
+	date_string2 (str): The second date string.
 
-    Returns:
-    bool: True if the first date is after the second date, False otherwise.
-    """
-    date_format = "%Y-%m-%d %H:%M:%S"
+	Returns:
+	bool: True if the first date is after the second date, False otherwise.
+	"""
+	date_format = "%Y-%m-%d %H:%M:%S"
 
-    # Convert date strings to datetime objects
-    date1 = datetime.strptime(date_string1, date_format)
-    date2 = datetime.strptime(date_string2, date_format)
+	# Convert date strings to datetime objects
+	date1 = datetime.strptime(date_string1, date_format)
+	date2 = datetime.strptime(date_string2, date_format)
 
-    # Compare the dates
-    return date1 >= date2
+	# Compare the dates
+	return date1 >= date2
 
 def date_is_before(date_string1, date_string2):
-    """
-    Compare two date strings and return True if the first date is before the second date.
+	"""
+	Compare two date strings and return True if the first date is before the second date.
 
-    Args:
-    date_string1 (str): The first date string.
-    date_string2 (str): The second date string.
+	Args:
+	date_string1 (str): The first date string.
+	date_string2 (str): The second date string.
 
-    Returns:
-    bool: True if the first date is after the second date, False otherwise.
-    """
-    date_format = "%Y-%m-%d %H:%M:%S"
+	Returns:
+	bool: True if the first date is after the second date, False otherwise.
+	"""
+	date_format = "%Y-%m-%d %H:%M:%S"
 
-    # Convert date strings to datetime objects
-    date1 = datetime.strptime(date_string1, date_format)
-    date2 = datetime.strptime(date_string2, date_format)
+	# Convert date strings to datetime objects
+	date1 = datetime.strptime(date_string1, date_format)
+	date2 = datetime.strptime(date_string2, date_format)
 
-    # Compare the dates
-    return date1 <= date2
+	# Compare the dates
+	return date1 <= date2
 
 def date_in_range(start_date, end_date, test_date):
 	if start_date == None and end_date == None:
@@ -1211,35 +1211,35 @@ def get_unique_id():
 @app.route('/logs')
 @app.route('/logs/<filename>')
 def logs(filename=None):
-    """View log files in the logs directory"""
-    # Get list of all .log files in the logs directory
-    log_files = []
-    for file in os.listdir('logs'):
-        if file.endswith('.log'):
-            log_files.append(file)
-    
-    # Sort log files with app.log first, then by name
-    log_files.sort(key=lambda x: (x != 'app.log', x))
-    
-    # If no filename specified, use app.log or the first log file found
-    if not filename:
-        filename = 'app.log' if 'app.log' in log_files else (log_files[0] if log_files else None)
-    
-    # Read the selected log file
-    log_content = ''
-    if filename and filename in log_files:
-        try:
-            with open(os.path.join('logs', filename), 'r') as f:
-                log_content = f.read()
-        except Exception as e:
-            logger.error(f"Error reading log file {filename}: {e}")
-            log_content = f"Error reading log file: {str(e)}"
-    
-    return render_template('logs.html', 
-                         settings=settings,
-                         log_files=log_files,
-                         current_log=filename,
-                         log_content=log_content)
+	"""View log files in the logs directory"""
+	# Get list of all .log files in the logs directory
+	log_files = []
+	for file in os.listdir('logs'):
+		if file.endswith('.log'):
+			log_files.append(file)
+	
+	# Sort log files with app.log first, then by name
+	log_files.sort(key=lambda x: (x != 'app.log', x))
+	
+	# If no filename specified, use app.log or the first log file found
+	if not filename:
+		filename = 'app.log' if 'app.log' in log_files else (log_files[0] if log_files else None)
+	
+	# Read the selected log file
+	log_content = ''
+	if filename and filename in log_files:
+		try:
+			with open(os.path.join('logs', filename), 'r') as f:
+				log_content = f.read()
+		except Exception as e:
+			logger.error(f"Error reading log file {filename}: {e}")
+			log_content = f"Error reading log file: {str(e)}"
+	
+	return render_template('logs.html', 
+						 settings=settings,
+						 log_files=log_files,
+						 current_log=filename,
+						 log_content=log_content)
 
 """
 Run Flask App
