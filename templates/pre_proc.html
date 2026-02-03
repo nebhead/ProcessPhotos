@@ -56,50 +56,154 @@
 
 <script>
     const output = document.getElementById('output');
-    let eventSourcePreProc = null;
+    let processId = null;
+    let pollInterval = null;
+    let lastLogSize = 0;
+    
+    // Initialize output div
+    if (output) {
+        output.textContent = '';
+    }
+    
+    console.log('Pre-process page loaded. Output div:', output);
     
     // Start checking process status immediately and then periodically
     checkRunningProcesses();
     
     function startPreProcessScript() {
+        console.log('Starting pre-process script...');
+        if (output) {
+            output.textContent += 'Starting pre-process script...\n';
+        }
+        
         const params = new URLSearchParams({
             script_arg: '{{ folder_path}}'
         });
         
-        eventSourcePreProc = new EventSource(`/stream/preprocess?${params.toString()}`);
+        // Start the process
+        fetch(`/start_process/preprocess?${params.toString()}`)
+            .then(response => response.json())
+            .then(data => {
+                console.log('Start process response:', data);
+                if (data.error) {
+                    if (output) {
+                        output.textContent += `Error: ${data.message}\n`;
+                    }
+                    checkRunningProcesses();
+                } else {
+                    processId = data.process_id;
+                    console.log('Process started with ID:', processId);
+                    if (output) {
+                        output.textContent += `Process started with ID: ${processId}\n\n`;
+                    }
+                    // Start polling for output
+                    startPolling();
+                }
+            })
+            .catch(error => {
+                console.error('Error starting process:', error);
+                if (output) {
+                    output.textContent += `Error starting process: ${error}\n`;
+                }
+                checkRunningProcesses();
+            });
+    }
+    
+    function startPolling() {
+        console.log('Starting polling...');
+        // Poll every 2 seconds for process updates
+        pollInterval = setInterval(pollProcessStatus, 2000);
+        // Do an immediate check
+        pollProcessStatus();
+    }
+    
+    function pollProcessStatus() {
+        if (!processId) {
+            console.log('No processId, skipping poll');
+            return;
+        }
         
-        eventSourcePreProc.onmessage = function(e) {
-            // Parse the JSON-encoded data and append it
-            const text = JSON.parse(e.data);
-            output.textContent += text;
-            output.scrollTop = output.scrollHeight;
-            
-            // Check process status to update UI
-            checkRunningProcesses();
-        };
-        
-        eventSourcePreProc.onerror = function(e) {
-            output.textContent += '\nConnection closed\n';
-            eventSourcePreProc.close();
-            
-            // Update the UI
-            checkRunningProcesses();
-            
-            // Final check after a delay to ensure all updates are processed
-            setTimeout(checkRunningProcesses, 1000);
-        };
+        fetch(`/process_status/${processId}`)
+            .then(response => response.json())
+            .then(data => {
+                console.log('Process status response:', data);
+                if (data.error) {
+                    if (output) {
+                        output.textContent += `Error checking process: ${data.message}\n`;
+                    }
+                    stopPolling();
+                    checkRunningProcesses();
+                    return;
+                }
+                
+                // Append new log content
+                if (data.log_content && data.log_content.length > lastLogSize) {
+                    console.log('New log content, lines:', data.log_content.length, 'Previous size:', lastLogSize);
+                    const newLines = data.log_content.slice(lastLogSize);
+                    if (output) {
+                        output.textContent += newLines.join('');
+                        output.scrollTop = output.scrollHeight;
+                    }
+                    lastLogSize = data.log_content.length;
+                } else if (data.log_content) {
+                    console.log('No new content. Log size:', data.log_content.length, 'Last tracked:', lastLogSize);
+                }
+                
+                // Check if process is complete
+                if (data.status === 'completed') {
+                    if (output) {
+                        output.textContent += `\n\n=== Process completed with return code ${data.return_code} ===\n`;
+                    }
+                    stopPolling();
+                    // Update UI immediately to show completion
+                    document.getElementById('preProcWorking').style.display = 'none';
+                    document.getElementById('preProcDone').style.display = '';
+                    document.getElementById('gotoImport').style.display = '';
+                    checkRunningProcesses();
+                } else if (data.status === 'error') {
+                    if (output) {
+                        output.textContent += `\n\n=== Process encountered an error ===\n`;
+                    }
+                    stopPolling();
+                    // Update UI immediately to show error state
+                    document.getElementById('preProcWorking').style.display = 'none';
+                    document.getElementById('preProcDone').style.display = '';
+                    document.getElementById('gotoImport').style.display = 'none';
+                    checkRunningProcesses();
+                }
+            })
+            .catch(error => {
+                console.error('Error polling process status:', error);
+                // Don't stop polling on network errors, just log them
+                if (output) {
+                    output.textContent += `\nWarning: Temporary connection issue, retrying...\n`;
+                }
+            });
+    }
+    
+    function stopPolling() {
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
     }
     
     // Check if preprocess is already running
+    console.log('Checking if pre-process is already running...');
     fetch('/check_running_processes')
         .then(response => response.json())
         .then(data => {
+            console.log('Running processes check:', data);
             if (data.preprocess_running) {
-                output.textContent = "Pre-process script is already running. Connecting to output stream...\n";
+                console.log('Pre-process is already running, waiting for it...');
+                if (output) {
+                    output.textContent = "Pre-process script is already running. Please wait for it to complete.\n";
+                }
                 $('#preProcWorking').show();
                 $('#preProcDone').hide();
                 $('#gotoImport').hide();
             } else {
+                console.log('Starting new pre-process script...');
                 startPreProcessScript();
             }
         })
@@ -114,8 +218,6 @@
     // Clean up when leaving the page
     window.addEventListener('beforeunload', function() {
         clearInterval(statusInterval);
-        if (eventSourcePreProc) {
-            eventSourcePreProc.close();
-        }
+        stopPolling();
     });
 </script>

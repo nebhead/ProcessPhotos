@@ -1,4 +1,8 @@
 #!/bin/bash
+# Disable buffering and enable error output
+set -o pipefail
+exec 2>&1  # Redirect stderr to stdout
+
 echo "Starting pre-processing..."
 
 # Check if a source directory was provided as argument
@@ -23,23 +27,32 @@ fi
 
 # Delete all files in import/ folder
 echo " - Deleting all files in import/ folder"
-find "$ROOT_DIR" -mindepth 1 -delete
+find "$ROOT_DIR" -mindepth 1 -delete 2>&1 || echo "Warning: Error deleting import folder contents"
 
 # Create import/unsorted directory if it doesn't exist
 if [ ! -d "$IMPORT_DIR" ]; then
     echo " - Creating import/unsorted directory..."
-    mkdir -p "$IMPORT_DIR"
+    mkdir -p "$IMPORT_DIR" || {
+        echo "ERROR: Failed to create import/unsorted directory"
+        exit 1
+    }
 fi
 
 # Create import/sorted directory if it doesn't exist
 if [ ! -d "$SORTED_DIR" ]; then
     echo " - Creating import/presorted directory..."
-    mkdir -p "$SORTED_DIR"
+    mkdir -p "$SORTED_DIR" || {
+        echo "ERROR: Failed to create import/presorted directory"
+        exit 1
+    }
 fi
 
 # Copy contents
 echo " - Copying contents from '$SOURCE_DIR' to '$IMPORT_DIR'..."
-cp -pr "$SOURCE_DIR"/* "$IMPORT_DIR"
+cp -prv "$SOURCE_DIR"/* "$IMPORT_DIR" 2>&1 || {
+    echo "ERROR: Copy operation failed with exit code $?"
+    exit 1
+}
 
 # Check if copy was successful
 if [ $? -eq 0 ]; then
@@ -51,6 +64,9 @@ fi
 
 # Run sortphotos
 echo " - Running sortphotos"
-python ./sortphotos/src/sortphotos.py -r --sort %Y/%m "$IMPORT_DIR" "$SORTED_DIR"
+python -u ./sortphotos/src/sortphotos.py -r --sort %Y/%m "$IMPORT_DIR" "$SORTED_DIR" 2>&1 || {
+    echo "ERROR: sortphotos failed with exit code $?"
+    exit 1
+}
 
 echo " - Pre-processing Script complete!"

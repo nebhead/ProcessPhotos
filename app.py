@@ -18,8 +18,10 @@ import threading
 import uuid
 import re
 import subprocess
+import json
+import shutil
 
-from flask import Flask, request, render_template, make_response, redirect, jsonify, abort, send_from_directory, Response
+from flask import Flask, request, render_template, make_response, redirect, jsonify, abort, send_from_directory, Response, send_file
 from common import *
 from exif.exif import *
 from typing import Dict
@@ -47,15 +49,30 @@ class ProcessTracker:
 		self._processes = {}  # Dictionary of process_id -> process object
 		self._lock = threading.Lock()
 		self._active_scripts = {}  # Dictionary to track scripts by type: "preprocess" or "postprocess"
+		self._log_dir = 'logs/process_logs'
+		# Create log directory if it doesn't exist
+		try:
+			os.makedirs(self._log_dir, exist_ok=True)
+			if 'logger' in globals():
+				logger.info(f"Process log directory: {self._log_dir}")
+		except Exception as e:
+			if 'logger' in globals():
+				logger.error(f"Failed to create log directory {self._log_dir}: {e}")
+			# Try to create it anyway if it doesn't exist
+			if not os.path.exists(self._log_dir):
+				raise
 		
-	def add_process(self, process, script_type=None):
+	def add_process(self, process, script_type=None, log_file=None):
 		with self._lock:
 			process_id = str(uuid.uuid4())
 			self._processes[process_id] = {
 				"process": process,
 				"pid": process.pid if hasattr(process, "pid") else None,
 				"start_time": datetime.now(),
-				"type": script_type
+				"type": script_type,
+				"log_file": log_file,
+				"status": "running",
+				"return_code": None
 			}
 			
 			# If this is a pre or post processing script, track it specifically
@@ -87,23 +104,45 @@ class ProcessTracker:
 				if process_info["pid"] == pid:
 					return process_id
 			return None
+	
+	def get_process_info(self, process_id):
+		"""Get detailed information about a process"""
+		with self._lock:
+			if process_id in self._processes:
+				process_info = self._processes[process_id].copy()
+				# Don't return the actual process object
+				if "process" in process_info:
+					del process_info["process"]
+				return process_info
+			return None
 
 	def _cleanup_finished_processes(self):
-		"""Helper method to clean up finished processes"""
+		"""Helper method to mark finished processes and remove them from active tracking
+		NOTE: This should only be called while holding self._lock"""
 		finished_ids = []
 		for process_id, process_info in self._processes.items():
 			process = process_info["process"]
 			try:
 				if hasattr(process, "poll") and process.poll() is not None:  # Process has finished
+					# Update status but keep in tracker for frontend to see completion
+					self._processes[process_id]["status"] = "completed"
+					self._processes[process_id]["return_code"] = process.poll()
 					finished_ids.append(process_id)
-					logger.info(f"Found finished process {process_info['pid']} with ID {process_id}")
+					logger.info(f"Found finished process {process_info['pid']} with ID {process_id} - Return code: {process.poll()}")
 			except Exception as e:
 				logger.error(f"Error checking process {process_info['pid']} with ID {process_id}: {e}")
-				finished_ids.append(process_id)  # Remove problematic processes
+				self._processes[process_id]["status"] = "error"
+				finished_ids.append(process_id)  # Mark problematic processes as error
 		
-		# Remove finished processes
+		# Remove from active scripts tracking, keep process info for frontend
 		for process_id in finished_ids:
-			self.remove_process(process_id)
+			process_info = self._processes[process_id]
+			# Remove from active scripts if it was one
+			for script_type, active_id in list(self._active_scripts.items()):
+				if active_id == process_id:
+					del self._active_scripts[script_type]
+					pid = process_info["pid"] if process_info["pid"] else "unknown"
+					logger.info(f"Removed {script_type} script from active tracking - PID: {pid}, ID: {process_id}")
 				
 	def has_running_processes(self, script_type=None):
 		with self._lock:
@@ -114,36 +153,46 @@ class ProcessTracker:
 			if script_type:
 				return script_type in self._active_scripts
 				
-			# Check if any processes are running
-			return len(self._processes) > 0
+			# Check if any processes are still running (status == "running")
+			return any(p["status"] == "running" for p in self._processes.values())
+
+	def get_active_process_id(self, script_type):
+		"""Return the active process_id for a given script type, or None"""
+		with self._lock:
+			# Clean up any finished processes first
+			self._cleanup_finished_processes()
+			return self._active_scripts.get(script_type)
 			
 	def get_status(self):
 		with self._lock:
 			# Clean up any finished processes first
 			self._cleanup_finished_processes()
 			
+			# Count only processes that are still running (not completed or error)
+			running_count = sum(1 for p in self._processes.values() if p["status"] == "running")
+			
 			# Get counts for different script types
 			status = {
-				"running_processes": len(self._processes),
+				"running_processes": running_count,
 				"preprocess_running": "preprocess" in self._active_scripts,
 				"postprocess_running": "postprocess" in self._active_scripts,
 				"active_pids": [],
 				"timestamp": datetime.now().isoformat()
 			}
 			
-			# Add active PIDs for detailed info
+			# Add active PIDs for detailed info (only running processes)
 			for process_id, process_info in self._processes.items():
-				if process_info["pid"]:
+				if process_info["status"] == "running" and process_info["pid"]:
 					status["active_pids"].append({
 						"pid": process_info["pid"],
 						"type": process_info["type"],
 						"running_time": (datetime.now() - process_info["start_time"]).total_seconds()
 					})
 			
-			# Log status if there are processes
-			if len(self._processes) > 0:
+			# Log status if there are running processes
+			if running_count > 0:
 				logger.info(f"Process status check:")
-				logger.info(f"- Running processes: {len(self._processes)}")
+				logger.info(f"- Running processes: {running_count}")
 				logger.info(f"- Active scripts: {list(self._active_scripts.keys())}")
 				logger.info(f"- Active PIDs: {[p['pid'] for p in status['active_pids']]}")
 			
@@ -290,6 +339,89 @@ def admin(action=None):
 	cpuinfo = os.popen('cat /proc/cpuinfo').readlines()
 
 	return render_template('admin.html', alert=alert, uptime=uptime, cpuinfo=cpuinfo, settings=settings)
+
+@app.route('/admin/backup_folders', methods=['GET'])
+def backup_folders():
+	"""Download the current folders.json file as a backup"""
+	try:
+		folders_path = 'config/folders.json'
+		
+		if not os.path.exists(folders_path):
+			logger.error(f"Backup failed: {folders_path} not found")
+			abort(404)
+		
+		logger.info('Backing up folders.json')
+		
+		# Create a timestamped filename
+		timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+		filename = f'folders_backup_{timestamp}.json'
+		
+		return send_file(
+			folders_path,
+			as_attachment=True,
+			download_name=filename,
+			mimetype='application/json'
+		)
+	except Exception as e:
+		logger.error(f"Error during backup: {str(e)}")
+		abort(500)
+
+@app.route('/admin/restore_folders', methods=['POST'])
+def restore_folders():
+	"""Upload and restore a folders.json file"""
+	try:
+		# Check if file was uploaded
+		if 'file' not in request.files:
+			return jsonify({'success': False, 'message': 'No file provided'}), 400
+		
+		file = request.files['file']
+		
+		if file.filename == '' or file.filename is None:
+			return jsonify({'success': False, 'message': 'No file selected'}), 400
+		
+		# Validate file type
+		if not file.filename.endswith('.json'):
+			return jsonify({'success': False, 'message': 'File must be a JSON file'}), 400
+		
+		# Read and validate JSON
+		try:
+			file_content = file.read().decode('utf-8')
+			json.loads(file_content)  # Validate JSON format
+		except json.JSONDecodeError:
+			return jsonify({'success': False, 'message': 'Invalid JSON file format'}), 400
+		except Exception as e:
+			return jsonify({'success': False, 'message': f'Error reading file: {str(e)}'}), 400
+		
+		# Backup current folders.json before restoring
+		folders_path = 'config/folders.json'
+		if os.path.exists(folders_path):
+			timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+			backup_path = f'{folders_path}.{timestamp}.restore_backup'
+			try:
+				shutil.copy2(folders_path, backup_path)
+				logger.info(f'Current folders.json backed up to {backup_path}')
+			except Exception as e:
+				logger.warning(f'Could not backup current folders.json: {str(e)}')
+		
+		# Write the restored file
+		try:
+			with open(folders_path, 'w') as f:
+				f.write(file_content)
+			
+			logger.info('Folders.json successfully restored from backup')
+			
+			# Reload the folder status
+			global folder_status
+			folder_status = read_folder_status(originals_path=settings['folders']['originals'])
+			
+			return jsonify({'success': True, 'message': 'Restore successful'}), 200
+		except Exception as e:
+			logger.error(f'Error writing folders.json: {str(e)}')
+			return jsonify({'success': False, 'message': f'Error saving file: {str(e)}'}), 500
+	
+	except Exception as e:
+		logger.error(f'Error during restore: {str(e)}')
+		return jsonify({'success': False, 'message': f'Restore failed: {str(e)}'}), 500
 
 @app.route('/manifest')
 def manifest():
@@ -527,7 +659,8 @@ def post_process():
 
 	return render_template('post_proc.html', settings=settings)
 
-def run_script(action, path='originals'):
+def start_script(action, path='originals'):
+	"""Start a script process that runs independently and writes to a log file"""
 	global settings
 	global process_tracker
 
@@ -536,129 +669,188 @@ def run_script(action, path='originals'):
 		raise ProcessRunningError(f"A {action} script is already running. Please wait for it to complete.")
 	
 	logger.info(f"====== Starting new {action} script execution ======")
+	
+	# Create log file for this process - use a temporary UUID for the log filename
+	log_id = str(uuid.uuid4())
+	log_file = os.path.join('logs/process_logs', f'{action}_{log_id}.log')
+	
 	if action == 'preprocess':
 		command = settings['scripts']['pre_proc']['type']
 		script_path = os.path.join(settings['scripts']['pre_proc']['path'], settings['scripts']['pre_proc']['script'])
 		arguments = path
 		logger.info(f"Command: {command} {script_path} {arguments}")
-		cmd_list = [command, script_path, arguments] if arguments else [command, script_path]
+		# Try to use stdbuf to disable output buffering, but make it work without it too
+		if shutil.which('stdbuf'):
+			cmd_list = ['stdbuf', '-oL', '-eL', command, script_path, arguments] if arguments else ['stdbuf', '-oL', '-eL', command, script_path]
+		else:
+			# Fallback without stdbuf (e.g., in minimal Docker containers)
+			cmd_list = [command, script_path, arguments] if arguments else [command, script_path]
 	else:
 		command = settings['scripts']['post_proc']['type']
 		script_path = os.path.join(settings['scripts']['post_proc']['path'], settings['scripts']['post_proc']['script']) 
 		logger.info(f"Command: {command} {script_path}")
-		cmd_list = [command, script_path]
+		# Try to use stdbuf to disable output buffering, but make it work without it too
+		if shutil.which('stdbuf'):
+			cmd_list = ['stdbuf', '-oL', '-eL', command, script_path]
+		else:
+			# Fallback without stdbuf (e.g., in minimal Docker containers)
+			cmd_list = [command, script_path]
 
 	try:
-		# Only include arguments if not empty
+		# Open log file for writing with unbuffered mode
+		log_handle = open(log_file, 'w', buffering=1)  # Line buffering
+		
+		# Start process with output redirected to log file
+		# Set PYTHONUNBUFFERED for Python scripts and ensure bash scripts output immediately
+		env = os.environ.copy()
+		env['PYTHONUNBUFFERED'] = '1'
+		
 		process = subprocess.Popen(
 			cmd_list,
-			stdout=subprocess.PIPE,
+			stdout=log_handle,
 			stderr=subprocess.STDOUT,
 			universal_newlines=True,
-			start_new_session=True  # This ensures the process runs in its own session
+			bufsize=1,  # Line buffering
+			env=env,
+			start_new_session=True  # Runs in its own session, won't be killed if parent dies
 		)
-		# Track this process
-		process_id = process_tracker.add_process(process, script_type=action)
-		logger.info(f"Started {action} process with PID: {process.pid}, ID: {process_id}")
+		
+		# Track this process with its log file and capture the returned process_id
+		process_id = process_tracker.add_process(process, script_type=action, log_file=log_file)
+		logger.info(f"Started {action} process with PID: {process.pid}, ID: {process_id}, Log: {log_file}")
+		
+		# Start background thread to monitor process completion
+		def monitor_process():
+			logger.info(f"Monitor thread started for process {process.pid}")
+			try:
+				return_code = process.wait()  # Wait for process to complete
+				logger.info(f"Process {process.pid} completed with return code {return_code}")
+			except Exception as e:
+				logger.error(f"Error in monitor_process: {e}")
+			finally:
+				# Close log file handle
+				try:
+					log_handle.close()
+				except:
+					pass
+				logger.info(f"====== Script execution completed for PID {process.pid} ======")
+		
+		monitor_thread = threading.Thread(target=monitor_process)
+		monitor_thread.daemon = True
+		monitor_thread.start()
+		
+		return process_id
+		
 	except Exception as e:
 		logger.error(f"Error starting script: {e}")
+		# Clean up log file if it was created
+		try:
+			if 'log_handle' in locals():
+				log_handle.close()
+			if os.path.exists(log_file):
+				os.remove(log_file)
+		except:
+			pass
 		raise
 
-	def monitor_process():
-		"""Monitor the process in a separate thread"""
-		logger.info(f"Monitor thread started for process {process.pid}")
-		try:
-			# Wait for process to complete
-			process.wait()
-			return_code = process.returncode
-			logger.info(f"Process {process.pid} completed with return code {return_code}")
-		except Exception as e:
-			logger.error(f"Error in monitor_process: {e}")
-			return_code = -1
-		finally:
-			# Ensure process is removed from tracking
-			process_id = process_tracker.get_process_id_by_pid(process.pid)
-			if process_id:
-				process_tracker.remove_process(process_id)
-			logger.info(f"====== Script execution completed for PID {process.pid} ======")
-
-	def stream_output():
-		"""Stream process output via SSE"""
-		try:
-			# Start monitoring thread
-			monitor_thread = threading.Thread(target=monitor_process)
-			monitor_thread.daemon = True
-			monitor_thread.start()
-			
-			# Small delay to ensure monitoring is established
-			time.sleep(0.2)
-
-			while True:
-				output = process.stdout.readline()
-				if output:
-					try:
-						# Send each line as a separate SSE event with newlines preserved
-						yield f"data: {json.dumps(output)}\n\n"
-						# Flush the output to ensure immediate display
-						yield f": keepalive\n\n"
-					except Exception as e:
-						logger.error(f"Error yielding output: {e}")
-						continue
-				
-				# Check if process has finished
-				if process.poll() is not None:
-					# Send final output
-					rc = process.poll()
-					try:
-						yield f"data: {json.dumps(f'Script finished with return code {rc}')}\n\n"
-					except Exception as e:
-						logger.error(f"Error yielding final status: {e}")
-					
-					# Only remove process after we've sent all output
-					process_id = process_tracker.get_process_id_by_pid(process.pid)
-					if process_id:
-						process_tracker.remove_process(process_id)
-					break
-
-		except Exception as e:
-			logger.error(f"Error in stream_output: {e}")
-			process_id = process_tracker.get_process_id_by_pid(process.pid)
-			if process_id:
-				process_tracker.remove_process(process_id)  # Clean up on error
-			try:
-				yield f"data: {json.dumps('Error occurred while streaming output')}\n\n"
-			except:
-				pass
-
-	return stream_output()
-
-@app.route('/stream')
-@app.route('/stream/<action>')
-def stream(action=None):
+@app.route('/start_process')
+@app.route('/start_process/<action>')
+def start_process_endpoint(action=None):
+	"""Start a background process and return its ID for polling"""
 	global process_tracker
 	
 	# Determine which action to use
 	script_action = action if action else "postprocess"
+	logger.info(f"=== START_PROCESS ENDPOINT CALLED ===")
+	logger.info(f"Action: {script_action}")
 	
 	# Check if the specific script type is already running
-	if process_tracker.has_running_processes(script_type=script_action):
+	is_running = process_tracker.has_running_processes(script_type=script_action)
+	logger.info(f"Script type '{script_action}' already running: {is_running}")
+	
+	if is_running:
+		logger.warning(f"Attempted to start {script_action} but one is already running")
 		return jsonify({
 			'error': True,
 			'message': f'A {script_action} script is currently running. Please wait for it to complete.'
 		}), 409  # HTTP 409 Conflict
 	
 	path = request.args.get('script_arg', 'originals')
+	logger.info(f"Script argument (path): {path}")
 	
 	try:
-		return Response(
-			run_script(script_action, path=path),
-			mimetype='text/event-stream'
-		)
+		logger.info(f"Starting {script_action} script with path: {path}")
+		process_id = start_script(script_action, path=path)
+		logger.info(f"Successfully started {script_action} with process ID: {process_id}")
+		return jsonify({
+			'success': True,
+			'process_id': process_id,
+			'message': f'{script_action} process started successfully'
+		})
 	except ProcessRunningError as e:
+		logger.warning(f"ProcessRunningError: {e}")
 		return jsonify({
 			'error': True,
 			'message': str(e)
 		}), 409
+	except Exception as e:
+		logger.error(f"Error starting process: {e}", exc_info=True)
+		return jsonify({
+			'error': True,
+			'message': f'Failed to start process: {str(e)}'
+		}), 500
+
+@app.route('/process_status/<process_id>')
+def get_process_status(process_id):
+	"""Get the status and recent output of a specific process"""
+	global process_tracker
+	
+	process_info = process_tracker.get_process_info(process_id)
+	
+	if not process_info:
+		return jsonify({
+			'error': True,
+			'message': 'Process not found'
+		}), 404
+	
+	# Get recent output from log file (all lines for incremental display)
+	log_content = []
+	if process_info.get('log_file') and os.path.exists(process_info['log_file']):
+		try:
+			with open(process_info['log_file'], 'r') as f:
+				log_content = f.readlines()  # Read all lines for incremental frontend display
+		except Exception as e:
+			logger.error(f"Error reading log file: {e}")
+	
+	return jsonify({
+		'success': True,
+		'status': process_info['status'],
+		'type': process_info['type'],
+		'return_code': process_info['return_code'],
+		'start_time': process_info['start_time'].isoformat(),
+		'log_content': log_content,
+		'log_file': process_info['log_file']
+	})
+
+@app.route('/active_process/<script_type>')
+def get_active_process(script_type):
+	"""Get the active process info for a given script type"""
+	global process_tracker
+	
+	process_id = process_tracker.get_active_process_id(script_type)
+	if not process_id:
+		return jsonify({
+			'success': True,
+			'process_id': None,
+			'process_info': None
+		})
+
+	process_info = process_tracker.get_process_info(process_id)
+	return jsonify({
+		'success': True,
+		'process_id': process_id,
+		'process_info': process_info
+	})
 
 @app.route('/check_running_processes')
 def check_running_processes():

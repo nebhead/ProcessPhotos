@@ -95,6 +95,34 @@
   </div>
 </div>
 
+<!-- Backup & Restore Folders -->
+<div class="card shadow">
+    <div class="card-header bg-warning">
+      <i class="fa-solid fa-database"></i>&nbsp; Backup & Restore
+    </div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-6">
+          <a href="/admin/backup_folders" type="button" class="btn btn-success w-100">
+            <i class="fa-solid fa-download"></i>&nbsp;
+            Download Backup
+          </a>
+          <br>
+          <small class="text-muted"><i>Download the current folders.json as a backup</i></small>
+        </div>
+        <div class="col-md-6">
+          <button type="button" class="btn btn-info w-100" onclick="document.getElementById('restoreFileInput').click();">
+            <i class="fa-solid fa-upload"></i>&nbsp;
+            Upload & Restore
+          </button>
+          <input type="file" id="restoreFileInput" style="display:none;" accept=".json" onchange="uploadRestore(this);">
+          <small class="text-muted"><i>Upload a previously downloaded folders.json file</i></small>
+        </div>
+      </div>
+    </div>
+  </div>
+<br>
+
 <!-- System Information Card -->
 <div class="card shadow">
     <div class="card-header bg-info">
@@ -142,5 +170,48 @@
         $(this).html('<i class="fa-solid fa-triangle-exclamation"></i>&nbsp; Reset Folders Data');
     });
   });
+
+  function uploadRestore(input) {
+    if (!input.files || !input.files[0]) {
+      return;
+    }
+
+    const file = input.files[0];
+    
+    // Validate file type
+    if (!file.name.endsWith('.json')) {
+      alert('Please select a valid JSON file');
+      return;
+    }
+
+    // Ask for confirmation
+    if (!confirm('Are you sure you want to restore from this backup? This will replace your current folders.json file.')) {
+      return;
+    }
+
+    // Create FormData and upload
+    const formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/admin/restore_folders', {
+      method: 'POST',
+      body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        alert('Restore successful! Reloading page...');
+        location.reload();
+      } else {
+        alert('Restore failed: ' + (data.message || 'Unknown error'));
+      }
+    })
+    .catch(error => {
+      alert('Error during restore: ' + error);
+    });
+
+    // Reset the file input
+    input.value = '';
+  }
 </script>
 {% endblock %}

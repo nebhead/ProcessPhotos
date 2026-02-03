@@ -5,6 +5,9 @@ WORKDIR /
 RUN groupadd -g 1000 appgroup && \
     useradd -u 1000 -g appgroup -s /bin/bash -m appuser
 
+# Install coreutils for stdbuf (unbuffered output)
+RUN apt-get update && apt-get install -y coreutils && rm -rf /var/lib/apt/lists/*
+
 COPY install/requirements.txt .
 COPY install/postproc.sh /
 COPY install/preproc.sh /

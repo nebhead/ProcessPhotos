@@ -46,68 +46,185 @@
 </div>
 
 <script>
-    const outputPostProc = document.getElementById('outputPostProc');
-    let eventSourcePostProc = null;
+    function initPostProcessPage() {
+        const outputPostProc = document.getElementById('outputPostProc');
+        let processId = null;
+        let pollInterval = null;
+        let lastLogSize = 0;
+
+        // Initialize output div
+        if (outputPostProc) {
+            outputPostProc.textContent = 'Post-process page loaded.\n';
+        }
     
-    // Start checking process status immediately and then periodically
-    checkRunningProcesses();
+    console.log('Post-process page loaded. Output div:', outputPostProc);
     
-    function startPostProcessScript() {
-        outputPostProc.textContent += '\n+++ Calling API +++\n';
+        // Start checking process status immediately and then periodically
+        checkRunningProcesses();
+    
+        function startPostProcessScript() {
+        console.log('Starting post-process script...');
+        if (outputPostProc) {
+            outputPostProc.textContent += 'Starting post-process script...\n';
+        }
         
         const paramsPostProc = new URLSearchParams({
             script_arg: 'postprocess'
         });
         
-        eventSourcePostProc = new EventSource(`/stream?${paramsPostProc.toString()}`);
-        
-        eventSourcePostProc.onmessage = function(e) {
-            // Parse the JSON-encoded data and append it
-            const text = JSON.parse(e.data);
-            outputPostProc.textContent += text;
-            outputPostProc.scrollTop = outputPostProc.scrollHeight;
-            
-            // Check process status to update UI
-            checkRunningProcesses();
-        };
-        
-        eventSourcePostProc.onerror = function(e) {
-            outputPostProc.textContent += '\nConnection closed\n';
-            eventSourcePostProc.close();
-            
-            // Update the UI
-            checkRunningProcesses();
-            
-            // Final check after a delay to ensure all updates are processed
-            setTimeout(checkRunningProcesses, 1000);
-        };
+        // Start the process
+        fetch(`/start_process/postprocess?${paramsPostProc.toString()}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache' }
+        })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Start process response:', data);
+                if (data.error) {
+                    if (outputPostProc) {
+                        outputPostProc.textContent += `Error: ${data.message}\n`;
+                    }
+                    checkRunningProcesses();
+                } else {
+                    processId = data.process_id;
+                    console.log('Process started with ID:', processId);
+                    if (outputPostProc) {
+                        outputPostProc.textContent += `Process started with ID: ${processId}\n\n`;
+                    }
+                    // Start polling for output
+                    startPolling();
+                }
+            })
+            .catch(error => {
+                console.error('Error starting process:', error);
+                if (outputPostProc) {
+                    outputPostProc.textContent += `Error starting process: ${error}\n`;
+                }
+                checkRunningProcesses();
+            });
     }
     
-    // Check if postprocess is already running
-    fetch('/check_running_processes')
-        .then(response => response.json())
-        .then(data => {
-            if (data.postprocess_running) {
-                outputPostProc.textContent = "Post-process script is already running. Connecting to output stream...\n";
-                $('#postProcWorking').show();
-                $('#postProcDone').hide();
-            } else {
-                startPostProcessScript();
-            }
-        })
-        .catch(error => {
-            console.error('Error checking process status:', error);
-            startPostProcessScript();
-        });
+        function startPolling() {
+        console.log('Starting polling...');
+        // Poll every 2 seconds for process updates
+        pollInterval = setInterval(pollProcessStatus, 2000);
+        // Do an immediate check
+        pollProcessStatus();
+    }
     
-    // Poll for status updates every 3 seconds
-    const statusInterval = setInterval(checkRunningProcesses, 3000);
-    
-    // Clean up when leaving the page
-    window.addEventListener('beforeunload', function() {
-        clearInterval(statusInterval);
-        if (eventSourcePostProc) {
-            eventSourcePostProc.close();
+        function pollProcessStatus() {
+        if (!processId) {
+            console.log('No processId, skipping poll');
+            return;
         }
-    });
+        
+        fetch(`/process_status/${processId}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache' }
+        })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Process status response:', data);
+                if (data.error) {
+                    if (outputPostProc) {
+                        outputPostProc.textContent += `Error checking process: ${data.message}\n`;
+                    }
+                    stopPolling();
+                    checkRunningProcesses();
+                    return;
+                }
+                
+                // Append new log content
+                if (data.log_content && data.log_content.length > lastLogSize) {
+                    console.log('New log content, lines:', data.log_content.length, 'Previous size:', lastLogSize);
+                    const newLines = data.log_content.slice(lastLogSize);
+                    if (outputPostProc) {
+                        outputPostProc.textContent += newLines.join('');
+                        outputPostProc.scrollTop = outputPostProc.scrollHeight;
+                    }
+                    lastLogSize = data.log_content.length;
+                } else if (data.log_content) {
+                    console.log('No new content. Log size:', data.log_content.length, 'Last tracked:', lastLogSize);
+                }
+                
+                // Check if process is complete
+                if (data.status === 'completed') {
+                    if (outputPostProc) {
+                        outputPostProc.textContent += `\n\n=== Process completed with return code ${data.return_code} ===\n`;
+                    }
+                    stopPolling();
+                    // Update UI immediately to show completion
+                    document.getElementById('postProcWorking').style.display = 'none';
+                    document.getElementById('postProcDone').style.display = '';
+                    checkRunningProcesses();
+                } else if (data.status === 'error') {
+                    if (outputPostProc) {
+                        outputPostProc.textContent += `\n\n=== Process encountered an error ===\n`;
+                    }
+                    stopPolling();
+                    // Update UI immediately to show error state
+                    document.getElementById('postProcWorking').style.display = 'none';
+                    document.getElementById('postProcDone').style.display = '';
+                    checkRunningProcesses();
+                }
+            })
+            .catch(error => {
+                console.error('Error polling process status:', error);
+                // Don't stop polling on network errors, just log them
+                if (outputPostProc) {
+                    outputPostProc.textContent += `\nWarning: Temporary connection issue, retrying...\n`;
+                }
+            });
+    }
+    
+        function stopPolling() {
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
+    }
+    
+        // Check if postprocess is already running
+        console.log('Checking if post-process is already running...');
+        fetch('/active_process/postprocess', {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache' }
+        })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Active post-process check:', data);
+                if (data.process_id) {
+                    console.log('Post-process is already running, attaching to it...');
+                    if (outputPostProc) {
+                        outputPostProc.textContent = "Post-process script is already running. Please wait for it to complete.\n";
+                    }
+                    $('#postProcWorking').show();
+                    $('#postProcDone').hide();
+                    processId = data.process_id;
+                    startPolling();
+                } else {
+                    console.log('Starting new post-process script...');
+                    startPostProcessScript();
+                }
+            })
+            .catch(error => {
+                console.error('Error checking process status:', error);
+                startPostProcessScript();
+            });
+        
+        // Poll for status updates every 3 seconds
+        const statusInterval = setInterval(checkRunningProcesses, 3000);
+        
+        // Clean up when leaving the page
+        window.addEventListener('beforeunload', function() {
+            clearInterval(statusInterval);
+            stopPolling();
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initPostProcessPage);
+    } else {
+        initPostProcessPage();
+    }
 </script>
