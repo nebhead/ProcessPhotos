@@ -33,6 +33,9 @@
                         <i class="fa-regular fa-thumbs-up"></i>
                     </span>
                 </strong>
+                <button id="cancelPreProcBtn" class="btn btn-danger btn-sm float-end" onclick="cancelPreProcess()" style="display: none;">
+                    <i class="fa-solid fa-stop"></i> Cancel Process
+                </button>
             </div>
 
             <div class="card-body">
@@ -96,6 +99,8 @@
                     if (output) {
                         output.textContent += `Process started with ID: ${processId}\n\n`;
                     }
+                    // Show cancel button
+                    $('#cancelPreProcBtn').show();
                     // Start polling for output
                     startPolling();
                 }
@@ -159,6 +164,7 @@
                     document.getElementById('preProcWorking').style.display = 'none';
                     document.getElementById('preProcDone').style.display = '';
                     document.getElementById('gotoImport').style.display = '';
+                    $('#cancelPreProcBtn').hide();
                     checkRunningProcesses();
                 } else if (data.status === 'error') {
                     if (output) {
@@ -169,6 +175,17 @@
                     document.getElementById('preProcWorking').style.display = 'none';
                     document.getElementById('preProcDone').style.display = '';
                     document.getElementById('gotoImport').style.display = 'none';
+                    $('#cancelPreProcBtn').hide();
+                    checkRunningProcesses();
+                } else if (data.status === 'cancelled') {
+                    if (output) {
+                        output.textContent += `\n\n=== Process was cancelled ===\n`;
+                    }
+                    stopPolling();
+                    // Update UI immediately to show cancelled state
+                    document.getElementById('preProcWorking').style.display = 'none';
+                    document.getElementById('gotoImport').style.display = 'none';
+                    $('#cancelPreProcBtn').hide();
                     checkRunningProcesses();
                 }
             })
@@ -188,6 +205,65 @@
         }
     }
     
+    function cancelPreProcess() {
+        if (!confirm('Are you sure you want to cancel the pre-processing script? This will terminate the process immediately.')) {
+            return;
+        }
+        
+        console.log('Cancelling pre-process...');
+        if (output) {
+            output.textContent += '\n\nCancelling process...\n';
+        }
+        
+        // Disable the cancel button to prevent multiple clicks
+        const cancelBtn = document.getElementById('cancelPreProcBtn');
+        if (cancelBtn) {
+            cancelBtn.disabled = true;
+            cancelBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Cancelling...';
+        }
+        
+        fetch('/cancel_process/preprocess', {
+            method: 'POST',
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache' }
+        })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Cancel response:', data);
+                if (data.success) {
+                    if (output) {
+                        output.textContent += `\nProcess cancelled successfully: ${data.message}\n`;
+                    }
+                    stopPolling();
+                    processId = null;
+                    $('#preProcWorking').hide();
+                    $('#preProcDone').hide();
+                    $('#cancelPreProcBtn').hide();
+                    checkRunningProcesses();
+                } else {
+                    if (output) {
+                        output.textContent += `\nError cancelling process: ${data.message}\n`;
+                    }
+                    // Re-enable the button
+                    if (cancelBtn) {
+                        cancelBtn.disabled = false;
+                        cancelBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Cancel Process';
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error cancelling process:', error);
+                if (output) {
+                    output.textContent += `\nError cancelling process: ${error}\n`;
+                }
+                // Re-enable the button
+                if (cancelBtn) {
+                    cancelBtn.disabled = false;
+                    cancelBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Cancel Process';
+                }
+            });
+    }
+    
     // Check if preprocess is already running
     console.log('Checking if pre-process is already running...');
     fetch('/check_running_processes')
@@ -202,6 +278,7 @@
                 $('#preProcWorking').show();
                 $('#preProcDone').hide();
                 $('#gotoImport').hide();
+                $('#cancelPreProcBtn').show();
             } else {
                 console.log('Starting new pre-process script...');
                 startPreProcessScript();

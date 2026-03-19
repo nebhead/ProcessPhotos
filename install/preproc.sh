@@ -3,7 +3,36 @@
 set -o pipefail
 exec 2>&1  # Redirect stderr to stdout
 
-echo "Starting pre-processing..."
+# Function to rotate log file if it exceeds max size
+rotate_log_if_needed() {
+    local log_file=$1
+    local max_size=$((50 * 1024 * 1024))  # 50MB max size
+    local max_backups=10
+    
+    if [ -f "$log_file" ]; then
+        local file_size=$(stat -f%z "$log_file" 2>/dev/null || stat -c%s "$log_file" 2>/dev/null || echo 0)
+        
+        if [ "$file_size" -gt "$max_size" ]; then
+            # Rotate existing backups
+            for ((i=max_backups-1; i>=1; i--)); do
+                if [ -f "${log_file}.$i" ]; then
+                    mv "${log_file}.$i" "${log_file}.$((i+1))"
+                fi
+            done
+            # Rename current log to .1
+            mv "$log_file" "${log_file}.1"
+            
+            echo "[$(date +'%Y-%m-%d %H:%M:%S')] Log rotated (exceeded ${max_size} bytes)"
+        fi
+    fi
+}
+
+# Function to log with timestamp
+log_msg() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
+}
+
+log_msg "Starting pre-processing..."
 
 # Check if a source directory was provided as argument
 if [ $# -ne 1 ]; then

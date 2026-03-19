@@ -20,6 +20,8 @@ import re
 import subprocess
 import json
 import shutil
+import signal
+import platform
 
 from flask import Flask, request, render_template, make_response, redirect, jsonify, abort, send_from_directory, Response, send_file
 from common import *
@@ -50,6 +52,8 @@ class ProcessTracker:
 		self._lock = threading.Lock()
 		self._active_scripts = {}  # Dictionary to track scripts by type: "preprocess" or "postprocess"
 		self._log_dir = 'logs/process_logs'
+		self._max_log_size = 50 * 1024 * 1024  # 50MB max size per log file
+		self._max_backups = 10  # Keep up to 10 backup log files
 		# Create log directory if it doesn't exist
 		try:
 			os.makedirs(self._log_dir, exist_ok=True)
@@ -61,9 +65,40 @@ class ProcessTracker:
 			# Try to create it anyway if it doesn't exist
 			if not os.path.exists(self._log_dir):
 				raise
+	
+	def _rotate_log_if_needed(self, log_file):
+		"""Rotate log file if it exceeds max size"""
+		try:
+			if os.path.exists(log_file):
+				file_size = os.path.getsize(log_file)
+				if file_size > self._max_log_size:
+					# Rotate existing backups
+					for i in range(self._max_backups - 1, 0, -1):
+						backup_file = f"{log_file}.{i}"
+						next_backup_file = f"{log_file}.{i+1}"
+						if os.path.exists(backup_file):
+							if os.path.exists(next_backup_file):
+								os.remove(next_backup_file)
+							os.rename(backup_file, next_backup_file)
+					
+					# Rename current log to .1
+					backup_file = f"{log_file}.1"
+					if os.path.exists(backup_file):
+						os.remove(backup_file)
+					os.rename(log_file, backup_file)
+					
+					if 'logger' in globals():
+						logger.info(f"Rotated log file {log_file} (was {file_size} bytes)")
+		except Exception as e:
+			if 'logger' in globals():
+				logger.warning(f"Error rotating log file {log_file}: {e}")
 		
 	def add_process(self, process, script_type=None, log_file=None):
 		with self._lock:
+			# Rotate log file if needed before adding new process
+			if log_file:
+				self._rotate_log_if_needed(log_file)
+			
 			process_id = str(uuid.uuid4())
 			self._processes[process_id] = {
 				"process": process,
@@ -115,6 +150,98 @@ class ProcessTracker:
 					del process_info["process"]
 				return process_info
 			return None
+	
+	def terminate_process(self, script_type):
+		"""Terminate a running process by script type (preprocess or postprocess)"""
+		import signal
+		import platform
+		with self._lock:
+			if script_type not in self._active_scripts:
+				logger.warning(f"No active {script_type} process to terminate")
+				return False, f"No active {script_type} process found"
+			
+			process_id = self._active_scripts[script_type]
+			process_info = self._processes.get(process_id)
+			
+			if not process_info:
+				logger.warning(f"Process info not found for {script_type} with ID {process_id}")
+				del self._active_scripts[script_type]
+				return False, "Process info not found"
+			
+			process = process_info["process"]
+			pid = process_info["pid"]
+			
+			try:
+				logger.info(f"Attempting to terminate {script_type} process with PID {pid}")
+				
+				# Check if process is still running
+				if process.poll() is not None:
+					logger.info(f"Process {pid} is not running (already terminated)")
+					# Update status
+					self._processes[process_id]["status"] = "completed"
+					self._processes[process_id]["return_code"] = process.poll()
+					del self._active_scripts[script_type]
+					return True, f"Process {pid} already terminated"
+				
+				# Since the process was started with start_new_session=True, it's in its own process group
+				# We need to kill the entire process group to ensure all child processes are killed
+				
+				if platform.system() == "Windows":
+					# On Windows, use TASKKILL to kill the process tree
+					logger.info(f"Terminating process tree on Windows for PID {pid}")
+					os.system(f"taskkill /PID {pid} /T /F")
+					process.wait(timeout=5)
+				else:
+					# On Unix/Linux, kill the entire process group
+					try:
+						# The process was started with start_new_session=True, so it's the session leader
+						# We can send a signal to the entire process group using -pid
+						logger.info(f"Sending SIGTERM to process group {pid}")
+						os.killpg(os.getpgid(pid), signal.SIGTERM)
+						
+						# Wait up to 3 seconds for graceful shutdown
+						time.sleep(0.1)
+						start_time = time.time()
+						while process.poll() is None and time.time() - start_time < 3:
+							time.sleep(0.1)
+						
+						# Check if process is still running
+						if process.poll() is None:
+							logger.warning(f"Process group {pid} did not terminate gracefully, sending SIGKILL")
+							os.killpg(os.getpgid(pid), signal.SIGKILL)
+							time.sleep(0.2)
+						
+						process.poll()  # Update return code
+						logger.info(f"Process group {pid} terminated")
+					except ProcessLookupError:
+						# Process group already terminated
+						logger.info(f"Process group {pid} already terminated")
+						process.poll()
+					except Exception as e:
+						logger.warning(f"Error killing process group {pid}: {e}, trying direct kill")
+						# Fallback: try to kill just the process
+						try:
+							process.terminate()
+							time.sleep(0.5)
+							if process.poll() is None:
+								process.kill()
+							process.wait(timeout=2)
+						except Exception as e2:
+							logger.error(f"Failed to kill process {pid}: {e2}")
+				
+				# Update process status
+				self._processes[process_id]["status"] = "cancelled"
+				self._processes[process_id]["return_code"] = -1
+				
+				# Remove from active scripts
+				del self._active_scripts[script_type]
+				
+				logger.info(f"Successfully terminated {script_type} process (PID: {pid}, ID: {process_id})")
+				return True, f"Process {pid} terminated successfully"
+				
+			except Exception as e:
+				logger.error(f"Error terminating process {pid}: {e}", exc_info=True)
+				return False, f"Error terminating process: {str(e)}"
 
 	def _cleanup_finished_processes(self):
 		"""Helper method to mark finished processes and remove them from active tracking
@@ -162,6 +289,36 @@ class ProcessTracker:
 			# Clean up any finished processes first
 			self._cleanup_finished_processes()
 			return self._active_scripts.get(script_type)
+	
+	def cleanup_old_logs(self):
+		"""Remove old rotated log files older than 30 days"""
+		import glob
+		from time import time
+		
+		max_age_seconds = 30 * 24 * 60 * 60  # 30 days in seconds
+		current_time = time()
+		
+		try:
+			# Find all log files (including rotated ones)
+			log_pattern = os.path.join(self._log_dir, '*.log*')
+			for log_file in glob.glob(log_pattern):
+				# Skip current logs (those without a number suffix)
+				if log_file.endswith('.log'):
+					continue
+				
+				# Check if file is old enough to delete
+				file_age = current_time - os.path.getmtime(log_file)
+				if file_age > max_age_seconds:
+					try:
+						os.remove(log_file)
+						if 'logger' in globals():
+							logger.info(f"Deleted old log file: {log_file}")
+					except Exception as e:
+						if 'logger' in globals():
+							logger.warning(f"Could not delete log file {log_file}: {e}")
+		except Exception as e:
+			if 'logger' in globals():
+				logger.warning(f"Error during log cleanup: {e}")
 			
 	def get_status(self):
 		with self._lock:
@@ -798,6 +955,44 @@ def start_process_endpoint(action=None):
 		return jsonify({
 			'error': True,
 			'message': f'Failed to start process: {str(e)}'
+		}), 500
+
+@app.route('/cancel_process/<script_type>', methods=['POST'])
+def cancel_process(script_type):
+	"""Cancel/terminate a running process by script type"""
+	global process_tracker
+	
+	logger.info(f"=== CANCEL_PROCESS ENDPOINT CALLED ===")
+	logger.info(f"Script type: {script_type}")
+	
+	# Validate script type
+	if script_type not in ['preprocess', 'postprocess']:
+		logger.error(f"Invalid script type: {script_type}")
+		return jsonify({
+			'error': True,
+			'message': f'Invalid script type: {script_type}'
+		}), 400
+	
+	try:
+		success, message = process_tracker.terminate_process(script_type)
+		
+		if success:
+			logger.info(f"Successfully cancelled {script_type} process: {message}")
+			return jsonify({
+				'success': True,
+				'message': message
+			})
+		else:
+			logger.warning(f"Failed to cancel {script_type} process: {message}")
+			return jsonify({
+				'error': True,
+				'message': message
+			}), 404
+	except Exception as e:
+		logger.error(f"Error cancelling {script_type} process: {e}", exc_info=True)
+		return jsonify({
+			'error': True,
+			'message': f'Failed to cancel process: {str(e)}'
 		}), 500
 
 @app.route('/process_status/<process_id>')
@@ -1511,6 +1706,22 @@ if secrets == {}:
 		'api_key': ''
 	}
 	write_generic_yaml(secrets, 'config/secrets.yaml')
+
+# Start background thread for periodic log cleanup
+def cleanup_logs_periodically():
+	"""Periodically clean up old log files"""
+	import time
+	while True:
+		try:
+			time.sleep(24 * 60 * 60)  # Run every 24 hours
+			process_tracker.cleanup_old_logs()
+		except Exception as e:
+			logger.warning(f"Error in log cleanup thread: {e}")
+
+cleanup_thread = threading.Thread(target=cleanup_logs_periodically)
+cleanup_thread.daemon = True
+cleanup_thread.start()
+logger.info("Log cleanup thread started")
 
 if __name__ == '__main__':
 	if settings['globals']['debug'] == False:

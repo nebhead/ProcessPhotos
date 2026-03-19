@@ -25,6 +25,9 @@
                         <i class="fa-regular fa-thumbs-up"></i>
                     </span>
                 </strong>
+                <button id="cancelPostProcBtn" class="btn btn-danger btn-sm float-end" onclick="cancelPostProcess()" style="display: none;">
+                    <i class="fa-solid fa-stop"></i> Cancel Process
+                </button>
             </div>
             <div class="card-body">
                 <style>
@@ -91,6 +94,8 @@
                     if (outputPostProc) {
                         outputPostProc.textContent += `Process started with ID: ${processId}\n\n`;
                     }
+                    // Show cancel button
+                    $('#cancelPostProcBtn').show();
                     // Start polling for output
                     startPolling();
                 }
@@ -156,6 +161,7 @@
                     // Update UI immediately to show completion
                     document.getElementById('postProcWorking').style.display = 'none';
                     document.getElementById('postProcDone').style.display = '';
+                    $('#cancelPostProcBtn').hide();
                     checkRunningProcesses();
                 } else if (data.status === 'error') {
                     if (outputPostProc) {
@@ -165,6 +171,16 @@
                     // Update UI immediately to show error state
                     document.getElementById('postProcWorking').style.display = 'none';
                     document.getElementById('postProcDone').style.display = '';
+                    $('#cancelPostProcBtn').hide();
+                    checkRunningProcesses();
+                } else if (data.status === 'cancelled') {
+                    if (outputPostProc) {
+                        outputPostProc.textContent += `\n\n=== Process was cancelled ===\n`;
+                    }
+                    stopPolling();
+                    // Update UI immediately to show cancelled state
+                    document.getElementById('postProcWorking').style.display = 'none';
+                    $('#cancelPostProcBtn').hide();
                     checkRunningProcesses();
                 }
             })
@@ -184,7 +200,66 @@
         }
     }
     
-        // Check if postprocess is already running
+    function cancelPostProcess() {
+        if (!confirm('Are you sure you want to cancel the post-processing script? This will terminate the process immediately.')) {
+            return;
+        }
+        
+        console.log('Cancelling post-process...');
+        if (outputPostProc) {
+            outputPostProc.textContent += '\n\nCancelling process...\n';
+        }
+        
+        // Disable the cancel button to prevent multiple clicks
+        const cancelBtn = document.getElementById('cancelPostProcBtn');
+        if (cancelBtn) {
+            cancelBtn.disabled = true;
+            cancelBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Cancelling...';
+        }
+        
+        fetch('/cancel_process/postprocess', {
+            method: 'POST',
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache' }
+        })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Cancel response:', data);
+                if (data.success) {
+                    if (outputPostProc) {
+                        outputPostProc.textContent += `\nProcess cancelled successfully: ${data.message}\n`;
+                    }
+                    stopPolling();
+                    processId = null;
+                    $('#postProcWorking').hide();
+                    $('#postProcDone').hide();
+                    $('#cancelPostProcBtn').hide();
+                    checkRunningProcesses();
+                } else {
+                    if (outputPostProc) {
+                        outputPostProc.textContent += `\nError cancelling process: ${data.message}\n`;
+                    }
+                    // Re-enable the button
+                    if (cancelBtn) {
+                        cancelBtn.disabled = false;
+                        cancelBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Cancel Process';
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error cancelling process:', error);
+                if (outputPostProc) {
+                    outputPostProc.textContent += `\nError cancelling process: ${error}\n`;
+                }
+                // Re-enable the button
+                if (cancelBtn) {
+                    cancelBtn.disabled = false;
+                    cancelBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Cancel Process';
+                }
+            });
+    }
+    
+    // Check if postprocess is already running
         console.log('Checking if post-process is already running...');
         fetch('/active_process/postprocess', {
             cache: 'no-store',
@@ -200,6 +275,7 @@
                     }
                     $('#postProcWorking').show();
                     $('#postProcDone').hide();
+                    $('#cancelPostProcBtn').show();
                     processId = data.process_id;
                     startPolling();
                 } else {

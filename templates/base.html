@@ -150,6 +150,16 @@
 			display: flex;
 			align-items: center;
 			justify-content: center;
+			cursor: pointer;
+			transition: transform 0.2s ease;
+		}
+
+		.process-indicator:hover {
+			transform: scale(1.1);
+		}
+
+		.process-indicator.clickable {
+			cursor: pointer;
 		}
 	</style>
 	<div class="version-pill">
@@ -168,6 +178,8 @@
 
 
 	<script>
+		let currentRunningProcessType = null; // Track which process is running
+
 		function checkRunningProcesses() {
 			fetch('/check_running_processes', {
 				// Prevent caching of the request
@@ -192,21 +204,32 @@
 					if (data.has_running_processes) {
 						indicator.classList.remove('bg-success');
 						indicator.classList.add('bg-danger');
+						indicator.classList.add('clickable');
 						indicator.innerHTML = '<i class="fas fa-cog fa-spin"></i>';
+						indicator.title = 'Click to view process details';
 						
-						if (data.preprocess_running && data.postprocess_running) {
-							statusMessage.textContent = 'Pre-processing and Post-processing scripts are running';
+						// Determine which process is running
+						if (data.postprocess_running) {
+							currentRunningProcessType = 'postprocess';
+							if (data.preprocess_running) {
+								statusMessage.textContent = 'Pre-processing and Post-processing scripts are running';
+							} else {
+								statusMessage.textContent = 'Post-processing script is running';
+							}
 						} else if (data.preprocess_running) {
+							currentRunningProcessType = 'preprocess';
 							statusMessage.textContent = 'Pre-processing script is running';
-						} else if (data.postprocess_running) {
-							statusMessage.textContent = 'Post-processing script is running';
 						} else {
+							currentRunningProcessType = null;
 							statusMessage.textContent = 'Scripts are running in the background';
 						}
 					} else {
+						currentRunningProcessType = null;
 						indicator.classList.remove('bg-danger');
 						indicator.classList.add('bg-success');
+						indicator.classList.remove('clickable');
 						indicator.innerHTML = '<i class="fas fa-check"></i>';
+						indicator.title = 'No scripts running';
 						statusMessage.textContent = 'No scripts running';
 						
 						// If no scripts are running, make sure UI reflects that
@@ -295,6 +318,69 @@
 
 		// Check immediately on page load
 		checkRunningProcesses();
+
+		// Add click handler to process indicator
+		document.getElementById('process-indicator').addEventListener('click', function() {
+			if (currentRunningProcessType) {
+				// Load the appropriate process page into the process_working_row
+				// Hide welcome row if visible
+				const welcomeRow = document.getElementById('process_welcome_row');
+				const workingRow = document.getElementById('process_working_row');
+				
+				if (welcomeRow) {
+					welcomeRow.style.display = 'none';
+				}
+				
+				if (workingRow) {
+					// Load the appropriate process page
+					if (currentRunningProcessType === 'preprocess') {
+						// Load preproc page
+						fetch('/preproc')
+							.then(response => response.text())
+							.then(html => {
+								workingRow.innerHTML = html;
+								workingRow.style.display = 'block';
+								// Scroll to the process section
+								workingRow.scrollIntoView({ behavior: 'smooth', block: 'start' });
+								// Re-initialize any scripts that were in the loaded page
+								// This is important if the loaded page has script tags
+								const scripts = workingRow.querySelectorAll('script');
+								scripts.forEach(script => {
+									const newScript = document.createElement('script');
+									newScript.textContent = script.textContent;
+									script.parentNode.replaceChild(newScript, script);
+								});
+							})
+							.catch(error => console.error('Error loading preproc:', error));
+					} else if (currentRunningProcessType === 'postprocess') {
+						// Load postproc page
+						fetch('/postproc')
+							.then(response => response.text())
+							.then(html => {
+								workingRow.innerHTML = html;
+								workingRow.style.display = 'block';
+								// Scroll to the process section
+								workingRow.scrollIntoView({ behavior: 'smooth', block: 'start' });
+								// Re-initialize any scripts that were in the loaded page
+								const scripts = workingRow.querySelectorAll('script');
+								scripts.forEach(script => {
+									const newScript = document.createElement('script');
+									newScript.textContent = script.textContent;
+									script.parentNode.replaceChild(newScript, script);
+								});
+							})
+							.catch(error => console.error('Error loading postproc:', error));
+					}
+				} else {
+					// Fallback: if process_working_row doesn't exist, navigate directly
+					if (currentRunningProcessType === 'preprocess') {
+						window.location.href = '/preproc';
+					} else if (currentRunningProcessType === 'postprocess') {
+						window.location.href = '/postproc';
+					}
+				}
+			}
+		});
 	</script>
 </body>
 </html>
