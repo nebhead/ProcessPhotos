@@ -19,13 +19,9 @@ def is_valid_image(file_path):
 
 """ This function will take an image path and return the exif data of the image.  Returns none if no exif data is found.  Only processes images with valid exif data such as TIFF, JPG, PNG and WEBP. """
 def get_exif_data(image_path):
-	# Check if the image is a valid image file
 	#logger = create_logger('app', filename='logs/app.log')
-	
-	if not is_valid_image(image_path):
-		return None
 	try:
-		# Open the image file
+		# Open the image file once and extract EXIF.
 		image = Image.open(image_path)
 		
 		# Extract EXIF data

@@ -13,7 +13,7 @@
 				</div>
 				<div class="row gy-2">
 					<div class="progress" role="progressbar" aria-label="Copying Files & Folders" aria-valuenow="{{ percent_complete }}" aria-valuemin="0" aria-valuemax="100" style="height: 40px">
-						<div class="progress-bar progress-bar-striped progress-bar-animated" style="width: {{ percent_complete }}%" id="copy_progress_percent">{{ percent_complete }}%</div>
+						<div class="progress-bar progress-bar-striped progress-bar-animated" style="width: {{ percent_complete }}%; min-width: 3rem;" id="copy_progress_percent">{{ percent_complete }}%</div>
 					</div>
 				</div>
 				<div class="row gy-2 text-center">
@@ -26,7 +26,7 @@
 				</div>
 				<script>
 					// Update Progress Bar
-					postdata = {
+					const copyPostData = {
 						"action": "copy_progress",
 						"task_id": "{{ task_id }}"
 					};
@@ -34,16 +34,35 @@
 						$.ajax({
 							url: "/importfolder",
 							type: "POST",
-							data: postdata,
+							dataType: "json",
+							data: copyPostData,
 							success: function(data) {
-								//console.log(data);
-								var progress = Math.floor(data.progress);
+								if (data.status === 'error') {
+									clearInterval(copy_interval);
+									$('.card-body').html(
+										'<div class="alert alert-danger" role="alert"><i class="fa-solid fa-triangle-exclamation"></i>&nbsp; <strong>Error copying files:</strong> ' +
+										(data.data && data.data.error ? data.data.error : 'An unknown error occurred.') +
+										'</div><div class="d-flex justify-content-center mt-3">' +
+										'<a href="/" class="btn btn-outline-primary"><i class="fa-solid fa-house"></i>&nbsp; Back to Dashboard</a></div>'
+									);
+									return;
+								}
+								var progress = Math.floor(data.progress || 0);
 								$("#copy_progress_percent").css("width", progress + "%");
 								$("#copy_progress_percent").text(progress + "%");
-								if (data.progress == 100) {
+								if (progress >= 100) {
 									clearInterval(copy_interval);
 									importFolder('range', '{{ originals_path }}');
 								}
+							},
+							error: function(xhr, status, error) {
+								clearInterval(copy_interval);
+								$('.card-body').html(
+									'<div class="alert alert-danger" role="alert"><i class="fa-solid fa-triangle-exclamation"></i>&nbsp; <strong>Copy progress request failed:</strong> ' +
+									(error || status || 'Unknown request error') +
+									'</div><div class="d-flex justify-content-center mt-3">' +
+									'<a href="/" class="btn btn-outline-primary"><i class="fa-solid fa-house"></i>&nbsp; Back to Dashboard</a></div>'
+								);
 							}
 						});
 					}, 200);
@@ -84,7 +103,7 @@
 				</div>
 				<div class="row gy-2">
 					<div class="progress" role="progressbar" aria-label="Analyzing" aria-valuenow="{{ percent_complete }}" aria-valuemin="0" aria-valuemax="100" style="height: 40px">
-						<div class="progress-bar progress-bar-striped progress-bar-animated" style="width: {{ percent_complete }}%" id="analyze_progress_percent">{{ percent_complete }}%</div>
+						<div class="progress-bar progress-bar-striped progress-bar-animated" style="width: {{ percent_complete }}%; min-width: 3rem;" id="analyze_progress_percent">{{ percent_complete }}%</div>
 					</div>
 				</div>
 				<div class="row gy-2 text-center">
@@ -97,7 +116,7 @@
 				</div>
 				<script>
 					// Update Progress Bar
-					postdata = {
+					const analyzePostData = {
 						"action": "analyze_progress",
 						"task_id": "{{ task_id }}"
 					};
@@ -105,16 +124,35 @@
 						$.ajax({
 							url: "/importfolder",
 							type: "POST",
-							data: postdata,
+							dataType: "json",
+							data: analyzePostData,
 							success: function(data) {
-								//console.log(data);
-								var progress = Math.floor(data.progress);
+								if (data.status === 'error') {
+									clearInterval(analyze_interval);
+									$('.card-body').html(
+										'<div class="alert alert-danger" role="alert"><i class="fa-solid fa-triangle-exclamation"></i>&nbsp; <strong>Error analyzing files:</strong> ' +
+										(data.data && data.data.error ? data.data.error : 'An unknown error occurred.') +
+										'</div><div class="d-flex justify-content-center mt-3">' +
+										'<a href="/" class="btn btn-outline-primary"><i class="fa-solid fa-house"></i>&nbsp; Back to Dashboard</a></div>'
+									);
+									return;
+								}
+								var progress = Math.floor(data.progress || 0);
 								$("#analyze_progress_percent").css("width", progress + "%");
 								$("#analyze_progress_percent").text(progress + "%");
-								if (data.progress == 100) {
+								if (progress >= 100) {
 									clearInterval(analyze_interval);
 									fixFiles('results', '{{ task_id }}');
 								}
+							},
+							error: function(xhr, status, error) {
+								clearInterval(analyze_interval);
+								$('.card-body').html(
+									'<div class="alert alert-danger" role="alert"><i class="fa-solid fa-triangle-exclamation"></i>&nbsp; <strong>Analyze progress request failed:</strong> ' +
+									(error || status || 'Unknown request error') +
+									'</div><div class="d-flex justify-content-center mt-3">' +
+									'<a href="/" class="btn btn-outline-primary"><i class="fa-solid fa-house"></i>&nbsp; Back to Dashboard</a></div>'
+								);
 							}
 						});
 					}, 200);

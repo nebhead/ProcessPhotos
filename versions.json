@@ -2,9 +2,9 @@
     "versions": {
         "exiftool": "13.50",
         "exiftool_date" : "Feb 7, 2026",
-        "server_base": "0.1.8",
+        "server_base": "0.1.9",
         "server_build": 4,
-        "server_date": "2026-02-15",
+        "server_date": "2026-03-18",
         "sortphotos": "2020-12-22",
         "sortphotos_commit": "9037913957f604f7453d8e7b02570cfbb7c2a86d"
     }

@@ -397,6 +397,12 @@ class ProgressTracker:
 				self._tasks[task_id]['progress'] = 100
 				self._tasks[task_id]['data'] = data
    
+	def fail_task(self, task_id: str, error_message: str) -> None:
+		with self._lock:
+			if task_id in self._tasks:
+				self._tasks[task_id]['status'] = 'error'
+				self._tasks[task_id]['data'] = {'error': error_message}
+   
 	def get_progress(self, task_id: str) -> dict:
 		with self._lock:
 			return self._tasks.get(task_id, {
@@ -698,8 +704,11 @@ def import_folder():
 				#print(f'start_date = {start_date}\nend_date = {end_date}')
 				task_id = get_unique_id()
 				progress_tracker.create_task(task_id)
+				logger.info(f"Analyze request accepted. Task ID: {task_id}, import_folder: {import_folder}, originals_path: {originals_path}, start_date: {start_date}, end_date: {end_date}")
 				analyze_thread = threading.Thread(target=analyze_import_folder, args=(settings['folders']['import'], task_id, originals_path, start_date, end_date))
+				analyze_thread.daemon = True
 				analyze_thread.start()
+				logger.info(f"Analyze thread started. Task ID: {task_id}")
 				progress_data = progress_tracker.get_progress(task_id)
 				#print(f'originals_path: {originals_path}') # DEBUG
 				#print(f'settings[folders][import]: {settings["folders"]["import"]}') # DEBUG
@@ -707,6 +716,8 @@ def import_folder():
 			if(action == 'analyze_progress'):
 				task_id = requestform['task_id']
 				progress = progress_tracker.get_progress(task_id)
+				if progress.get('status') == 'error':
+					logger.warning(f"Analyze progress polled in error state. Task ID: {task_id}, error: {progress.get('data', {}).get('error')}")
 				return jsonify(progress)
 			
 			if(action == 'cancel'):
@@ -1263,62 +1274,148 @@ def copy_folder_structure(originals_path, import_folder, task_id):
 	""" Copy folder structure and all files from originals folder to the import folder and provide progress updates while copying. """
 	try:
 		#print(f'\n ** Copying folder structure and files from {originals_path} to {import_folder}. ** \n')
-		total_files = sum([len(files) for _, _, files in os.walk(originals_path)])
-		processed_files = 0
+		status = progress_tracker.update_progress(task_id, 1, 0, 1)
+		if not status:
+			return
+
+		if not os.path.exists(originals_path):
+			raise FileNotFoundError(f"Source folder not found: {originals_path}")
+
+		# Phase 1: Build file list with heartbeat progress so UI doesn't appear stuck.
+		files_to_copy = []
+		scanned_dirs = 0
 		for root, dirs, files in os.walk(originals_path):
+			scanned_dirs += 1
 			for file in files:
-				file_path = os.path.join(root, file)
-				relative_path = os.path.relpath(file_path, originals_path)
-				import_path = os.path.join(import_folder, relative_path)
-				#print(f"[DEBUG] cp '{file_path}' '{import_path}'") # DEBUG
-				os.makedirs(os.path.dirname(import_path), exist_ok=True)
-				os.system(f"cp -p '{file_path}' '{import_path}'")
-				processed_files += 1
-				progress = (processed_files / total_files) * 100
-				status = progress_tracker.update_progress(task_id, progress, processed_files, total_files)
+				files_to_copy.append((root, file))
+			if scanned_dirs % 25 == 0:
+				heartbeat_progress = min(10, 1 + int(scanned_dirs / 25))
+				status = progress_tracker.update_progress(task_id, heartbeat_progress, scanned_dirs, scanned_dirs + 1)
 				if not status:
 					return
+				logger.info(f"Copy scan progress: scanned {scanned_dirs} directories, discovered {len(files_to_copy)} files")
+
+		total_files = len(files_to_copy)
+		if total_files == 0:
+			logger.error(f"No files found in source folder: {originals_path}")
+			progress_tracker.fail_task(task_id, f"No files found in source folder: {originals_path}")
+			return
+
+		logger.info(f"Starting copy task. Source: {originals_path}, Destination: {import_folder}, Files: {total_files}")
+		processed_files = 0
+		for root, file in files_to_copy:
+			file_path = os.path.join(root, file)
+			relative_path = os.path.relpath(file_path, originals_path)
+			import_path = os.path.join(import_folder, relative_path)
+			try:
+				if not os.path.isfile(file_path):
+					raise OSError(f"Not a regular file: {file_path}")
+				os.makedirs(os.path.dirname(import_path), exist_ok=True)
+				shutil.copyfile(file_path, import_path)
+				try:
+					shutil.copystat(file_path, import_path)
+				except OSError as stat_err:
+					# Metadata copy failures should not stop content copy.
+					logger.warning(f"copystat failed for '{file_path}': {stat_err}")
+			except (FileNotFoundError, PermissionError, OSError) as e:
+				logger.error(f"File operation error copying '{file}': {e}")
+				progress_tracker.fail_task(task_id, f"Error copying '{file}': {e}")
+				return
+			processed_files += 1
+			if processed_files % 25 == 0:
+				logger.info(f"Copy task progress: {processed_files}/{total_files}")
+			progress = 10 + ((processed_files / total_files) * 90)
+			status = progress_tracker.update_progress(task_id, progress, processed_files, total_files)
+			if not status:
+				return
 		data = {'alert': {'type': 'success', 'text': 'Folder structure and files copied successfully.'}, 'original_path': originals_path}
 		progress_tracker.complete_task(task_id, data=data)
+		logger.info(f"Copy task completed successfully. Files copied: {processed_files}/{total_files}, Task ID: {task_id}")
 	except Exception as e:
-		data = {'alert': {'type': 'danger', 'text': f'Error copying folder structure and files: {e}'}, 'original_path': originals_path}
-		progress_tracker.complete_task(task_id, data=data)
-		logger.error(f"Error copying folder structure and files: {e}")
+		logger.error(f"Unexpected error in copy_folder_structure: {e}")
+		progress_tracker.fail_task(task_id, f"Unexpected error: {e}")
 
 def analyze_import_folder(import_folder, task_id, originals_path, start_date, end_date):
 	""" Recusively analyze files and folders in the import folder. Create and return a dictionary of three dictionaries: files_with_dates (image files with exif date), files_without_dates (image files without exif date), and ignored_files (all other files). Each entry into these dictionaries should have the path, filename, date (if exif data exists). """
 	#print(f'\n ** Analyzing import folder: {import_folder} from originals folder: {originals_path} ** \n')
+	logger.info(f"Analyze worker entered. Task ID: {task_id}, folder: {import_folder}")
 	files_with_dates = []
 	files_without_dates = []
 	ignored_files = []
-	total_files = sum([len(files) for _, _, files in os.walk(import_folder)])
-	processed_files = 0
-	for root, dirs, files in os.walk(import_folder):
-		for file in files:
-			file_path = os.path.join(root, file)
-			if is_valid_image(file_path):
-				exif_data = get_exif_data(file_path)
-				date = get_exif_date(exif_data)
-				file_date = get_file_date(file_path)
-				#print(f'file_root: {root}, file: {file}, date: {date}, file_date: {file_date}')
-				image_link = root.replace('./static/', '').replace('./', '') + '/' + file 
-				#print(f'image_link: {image_link}')
-				if date:
-					guessed_dates = guess_date(file, file_date, file_path, start_date, end_date)
-					files_with_dates.append({'path': root, 'filename': file, 'date': date, 'file_date': file_date, 'image_link': image_link, 'guessed_dates': guessed_dates, 'start_date': start_date, 'end_date': end_date})
-				else:
-					guessed_dates = guess_date(file, file_date, file_path, start_date, end_date)
-					files_without_dates.append({'path': root, 'filename': file, 'file_date': file_date, 'image_link': image_link, 'guessed_dates': guessed_dates, 'start_date': start_date, 'end_date': end_date})
-			else:
-				ignored_files.append({'path': root, 'filename': file})
+	try:
+		status = progress_tracker.update_progress(task_id, 1, 0, 1)
+		if not status:
+			return
+
+		if not os.path.exists(import_folder):
+			raise FileNotFoundError(f"Import folder not found: {import_folder}")
+
+		# Phase 1: Build file list with heartbeat progress while scanning directories.
+		files_to_analyze = []
+		scanned_dirs = 0
+		for root, dirs, files in os.walk(import_folder):
+			scanned_dirs += 1
+			for file in files:
+				files_to_analyze.append((root, file))
+			if scanned_dirs % 25 == 0:
+				heartbeat_progress = min(10, 1 + int(scanned_dirs / 25))
+				status = progress_tracker.update_progress(task_id, heartbeat_progress, scanned_dirs, scanned_dirs + 1)
+				if not status:
+					return
+				logger.info(f"Analyze scan progress: scanned {scanned_dirs} directories, discovered {len(files_to_analyze)} files")
+
+		total_files = len(files_to_analyze)
+		if total_files == 0:
+			raise FileNotFoundError(f"No files found in import folder: {import_folder}")
+
+		logger.info(f"Starting analyze task. Source: {import_folder}, Files: {total_files}")
+		processed_files = 0
+		image_extensions = {'.jpg', '.jpeg', '.png', '.tif', '.tiff', '.webp'}
+		for root, file in files_to_analyze:
 			processed_files += 1
-			progress = (processed_files / total_files) * 100
+			progress = 10 + ((processed_files / total_files) * 90)
 			status = progress_tracker.update_progress(task_id, progress, processed_files, total_files)
 			if not status:
 				return
-	import_data = {'files_with_dates': files_with_dates, 'files_without_dates': files_without_dates, 'ignored_files': ignored_files, 'original_path': originals_path}
-	progress_tracker.complete_task(task_id, data=import_data)
-	#print(import_data) # DEBUG
+			if processed_files <= 3 or processed_files % 25 == 0:
+				logger.info(f"Analyze task processing file {processed_files}/{total_files}: {os.path.join(root, file)}")
+
+			file_path = os.path.join(root, file)
+			try:
+				file_ext = os.path.splitext(file)[1].lower()
+				if file_ext in image_extensions:
+					exif_data = get_exif_data(file_path)
+					date = get_exif_date(exif_data)
+					file_date = get_file_date(file_path)
+					#print(f'file_root: {root}, file: {file}, date: {date}, file_date: {file_date}')
+					image_link = root.replace('./static/', '').replace('./', '') + '/' + file 
+					#print(f'image_link: {image_link}')
+					if date:
+						guessed_dates = guess_date(file, file_date, file_path, start_date, end_date)
+						files_with_dates.append({'path': root, 'filename': file, 'date': date, 'file_date': file_date, 'image_link': image_link, 'guessed_dates': guessed_dates, 'start_date': start_date, 'end_date': end_date})
+					else:
+						guessed_dates = guess_date(file, file_date, file_path, start_date, end_date)
+						files_without_dates.append({'path': root, 'filename': file, 'file_date': file_date, 'image_link': image_link, 'guessed_dates': guessed_dates, 'start_date': start_date, 'end_date': end_date})
+				else:
+					ignored_files.append({'path': root, 'filename': file})
+			except (FileNotFoundError, PermissionError, OSError) as e:
+				logger.error(f"File operation error reading '{file_path}': {e}")
+				progress_tracker.fail_task(task_id, f"Error reading '{file}': {e}")
+				return
+			except Exception as e:
+				logger.error(f"Unexpected analyze error for '{file_path}': {e}")
+				progress_tracker.fail_task(task_id, f"Error analyzing '{file}': {e}")
+				return
+
+			if processed_files % 25 == 0:
+				logger.info(f"Analyze task progress: {processed_files}/{total_files}")
+		import_data = {'files_with_dates': files_with_dates, 'files_without_dates': files_without_dates, 'ignored_files': ignored_files, 'original_path': originals_path}
+		progress_tracker.complete_task(task_id, data=import_data)
+		logger.info(f"Analyze task completed successfully. Files analyzed: {processed_files}/{total_files}, Task ID: {task_id}")
+		#print(import_data) # DEBUG
+	except Exception as e:
+		logger.error(f"Error analyzing import folder: {e}")
+		progress_tracker.fail_task(task_id, f"Error analyzing folder: {e}")
 
 def process_files(task_id, task_list, import_data):
 	""" Process the files based on the task list. """
@@ -1382,10 +1479,19 @@ def process_files(task_id, task_list, import_data):
 	export_folder = f"{settings['folders']['export']}/"
 	# Delete files in export folder before copying files
 	try:
-		os.system(f"rm -rf {export_folder}*")
+		if os.path.exists(export_folder):
+			for item in os.listdir(export_folder):
+				item_path = os.path.join(export_folder, item)
+				if os.path.isdir(item_path):
+					shutil.rmtree(item_path)
+				else:
+					os.remove(item_path)
+		else:
+			os.makedirs(export_folder, exist_ok=True)
 	except Exception as e:
-		#print(f'Oh dang it! There was an error deleting files in the export folder: {e}')
-		logger.error(f'Error deleting files in the export folder: {e}')
+		logger.error(f'Critical error clearing export folder: {e}')
+		progress_tracker.fail_task(task_id, f"Cannot clear export folder '{export_folder}': {e}")
+		return
 
 	for group in ['files_with_dates', 'files_without_dates', 'ignored_files']:
 		for file in import_data[group]:
@@ -1399,9 +1505,10 @@ def process_files(task_id, task_list, import_data):
 					logger.error(f'Error deleting {file_path.replace(IMPORT_FOLDER, '')}: {e}')
 			else:
 				try:
-					os.makedirs(export_folder + file['path'].replace(IMPORT_FOLDER, ''), exist_ok=True)
-					os.system(f"cp -p '{file_path}' '{export_folder}{file['path'].replace(IMPORT_FOLDER, '')}'")
-					os.system(f"rm '{file_path}'")
+					dest_dir = export_folder + file['path'].replace(IMPORT_FOLDER, '')
+					os.makedirs(dest_dir, exist_ok=True)
+					shutil.copy2(file_path, dest_dir)
+					os.remove(file_path)
 					results['files_copied'].append(f'{file_path.replace(IMPORT_FOLDER, '')} was copied to export folder.')
 				except Exception as e:
 					results['errors'].append(f'Error moving {file_path.replace(IMPORT_FOLDER, '')} to export folder: {e}')
@@ -1694,7 +1801,12 @@ def logs(filename=None):
 """
 Run Flask App
 """
-logger = create_logger('app', filename='logs/app.log', level=settings['globals']['log_level'])
+configured_log_level = settings['globals'].get('log_level', 40)
+effective_log_level = 20 if settings['globals'].get('debug', False) and configured_log_level > 20 else configured_log_level
+logger = create_logger('app', filename='logs/app.log', level=effective_log_level)
+
+if effective_log_level != configured_log_level:
+	logger.warning(f"Debug mode is enabled; overriding log level from {configured_log_level} to {effective_log_level} (INFO)")
 
 logger.info('Application Started.')
 

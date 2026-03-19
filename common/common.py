@@ -83,7 +83,7 @@ def default_settings():
 
 	settings['globals'] = {
 		'debug' : False,
-		'log_level' : logging.ERROR,
+		'log_level' : logging.INFO,
 		'public_url': '',
 		'theme': 'bootstrap-yeti.min.css', # default to base theme, bootstrap-yeti.min.css 
 		'themelist': [

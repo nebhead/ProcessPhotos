@@ -12,12 +12,13 @@
 
 {% if action is defined %}
 	{% if action == "process" %}
+		<div id="finish-process-container">
 		<div class="row gy-2 text-center">
 			<h3>Processing Files...</h3>
 		</div>
 		<div class="row gy-2">
 			<div class="progress" role="progressbar" aria-label="Processing Files & Folders" aria-valuenow="{{ percent_complete }}" aria-valuemin="0" aria-valuemax="100" style="height: 40px">
-				<div class="progress-bar progress-bar-striped progress-bar-animated" style="width: {{ percent_complete }}%" id="progress_percent">{{ percent_complete }}%</div>
+				<div class="progress-bar progress-bar-striped progress-bar-animated" style="width: {{ percent_complete }}%; min-width: 3rem;" id="progress_percent">{{ percent_complete }}%</div>
 			</div>
 		</div>
 		<div class="row gy-2 text-center">
@@ -30,7 +31,7 @@
 		</div>
 		<script>
 			// Update Progress Bar
-			postdata = {
+			const processPostData = {
 				"action": "process_progress",
 				"task_id": "{{ task_id }}"
 			};
@@ -38,20 +39,41 @@
 				$.ajax({
 					url: "/finish",
 					type: "POST",
-					data: postdata,
+					dataType: "json",
+					data: processPostData,
 					success: function(data) {
 						//console.log(data.progress);
-						var progress = Math.floor(data.progress);
+						if (data.status === 'error') {
+							clearInterval(process_interval);
+							$('#finish-process-container').html(
+								'<div class="alert alert-danger" role="alert"><i class="fa-solid fa-triangle-exclamation"></i>&nbsp; <strong>Error processing files:</strong> ' +
+								(data.data && data.data.error ? data.data.error : 'An unknown error occurred.') +
+								'</div><div class="d-flex justify-content-center mt-3">' +
+								'<a href="/" class="btn btn-outline-primary"><i class="fa-solid fa-house"></i>&nbsp; Back to Dashboard</a></div>'
+							);
+							return;
+						}
+						var progress = Math.floor(data.progress || 0);
 						$("#progress_percent").css("width", progress + "%");
 						$("#progress_percent").text(progress + "%");
-						if (data.progress == 100) {
+						if (progress >= 100) {
 							clearInterval(process_interval);
 							showResultsPage('{{ task_id }}');
 						}
+					},
+					error: function(xhr, status, error) {
+						clearInterval(process_interval);
+						$('#finish-process-container').html(
+							'<div class="alert alert-danger" role="alert"><i class="fa-solid fa-triangle-exclamation"></i>&nbsp; <strong>Process progress request failed:</strong> ' +
+							(error || status || 'Unknown request error') +
+							'</div><div class="d-flex justify-content-center mt-3">' +
+							'<a href="/" class="btn btn-outline-primary"><i class="fa-solid fa-house"></i>&nbsp; Back to Dashboard</a></div>'
+						);
 					}
 				});
 			}, 200);
 		</script>
+		</div>
 	{% elif action == "results" %}
 	<div class="row">
 		<div class="col">
